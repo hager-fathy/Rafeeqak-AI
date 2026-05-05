@@ -1,10 +1,11 @@
 # Smart Study Planner
 
-This repository contains phase 1, phase 2, and phase 3 (Supabase memory) of the Smart Study Planner Chatbot project:
+This repository contains phase 1, phase 2, phase 3 (Supabase memory), and phase 4 (multi-agent routing) of the Smart Study Planner Chatbot project:
 
 - Phase 1: project setup and base structure
 - Phase 2: Streamlit UI pages (chat, study plan, upload, quiz, dashboard)
 - Phase 3: persistent memory with Supabase schema and repository integration
+- Phase 4: input routing, supervisor orchestration, study planner agent, memory handoff, and route trace logging
 
 ## Quick Start
 
@@ -80,11 +81,17 @@ smart-study-planner/
   - courses and exams
   - generated study tasks
   - quiz scores and weak topics
+- Phase 4 agent flow:
+  - Safety Agent screens unsafe routing attempts
+  - Input Router Agent detects intent and language
+  - Supervisor Agent selects and runs the specialist agent
+  - Study Planner Agent creates plans and recommends next tasks
+  - Memory Agent syncs plans and quiz attempts when Supabase is configured
+  - Route traces are saved in session state and shown in Chat/Dashboard
 
 ## Next Phases
 
 Upcoming phases can build on this scaffold by adding:
 
-- Multi-agent routing and orchestration
 - RAG indexing and retrieval
 - Quiz generation and automated evaluation

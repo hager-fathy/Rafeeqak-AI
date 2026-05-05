@@ -2,29 +2,23 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.tools.state import touch_activity
+from src.tools.state import append_route_trace, get_memory_agent, get_supervisor_agent, touch_activity
 from src.ui.theme import render_page_hero
 
 
 def _assistant_reply(user_message: str) -> str:
-    message = user_message.lower()
-    active_plan = st.session_state.get("active_plan")
-
-    if "study today" in message or "what should i study" in message:
-        if not active_plan:
-            return "I do not have a study plan yet. Open the Study Plan page and generate one first."
-
-        upcoming_tasks = [task for task in active_plan["tasks"] if not task["completed"]]
-        if not upcoming_tasks:
-            return "Nice work. You completed all tasks in the current plan. Generate a fresh revision plan."
-
-        task = upcoming_tasks[0]
-        return f"Today focus on {task['topic']} ({task['hours']}h). Goal: {task['task']}."
-
-    if "weak" in message:
-        return "I can prioritize weak topics in your schedule. Add them in the Study Plan page."
-
-    return "I am ready to help with planning, revision, and quizzes. Ask me what to study next."
+    result = get_supervisor_agent().handle_message(
+        user_message,
+        context={
+            "active_plan": st.session_state.get("active_plan"),
+            "study_plans": st.session_state.get("study_plans", []),
+            "quiz_attempts": st.session_state.get("quiz_attempts", []),
+            "uploads": st.session_state.get("uploads", []),
+        },
+        memory_agent=get_memory_agent(),
+    )
+    append_route_trace(result["trace"])
+    return result["response"]
 
 
 def render_chat_page(project_root: Path) -> None:
@@ -80,6 +74,13 @@ def render_chat_page(project_root: Path) -> None:
             len(st.session_state.study_plans),
             border=True,
         )
+        route_traces = st.session_state.get("route_traces", [])
+        st.metric("Route traces", len(route_traces), border=True)
+        if route_traces:
+            with st.expander("Latest route trace", expanded=False):
+                for step in route_traces[-1]:
+                    st.caption(f"{step['agent']} | {step['step']} | {step['status']}")
+                    st.write(step["action"])
         if st.button("Clear chat history", width="stretch"):
             st.session_state.chat_history = []
             touch_activity()

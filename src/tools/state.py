@@ -3,6 +3,7 @@ from datetime import datetime
 import streamlit as st
 
 from src.agents.memory_agent import MemoryAgent
+from src.agents.supervisor import SupervisorAgent
 
 
 def init_state() -> None:
@@ -15,6 +16,7 @@ def init_state() -> None:
         "uploads": [],
         "last_activity_at": datetime.utcnow().isoformat(timespec="seconds"),
         "memory_sync_notice": None,
+        "route_traces": [],
         "auth_user": None,
         "auth_access_token": None,
         "auth_refresh_token": None,
@@ -33,6 +35,19 @@ def get_memory_agent() -> MemoryAgent:
     if "memory_agent" not in st.session_state:
         st.session_state["memory_agent"] = MemoryAgent()
     return st.session_state["memory_agent"]
+
+
+def get_supervisor_agent() -> SupervisorAgent:
+    if "supervisor_agent" not in st.session_state:
+        st.session_state["supervisor_agent"] = SupervisorAgent()
+    return st.session_state["supervisor_agent"]
+
+
+def append_route_trace(trace: list[dict]) -> None:
+    if "route_traces" not in st.session_state:
+        st.session_state["route_traces"] = []
+    st.session_state["route_traces"].append(trace)
+    st.session_state["route_traces"] = st.session_state["route_traces"][-20:]
 
 
 def set_authenticated_user(

@@ -4,57 +4,18 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src.tools.state import get_authenticated_user, get_memory_agent, touch_activity
+from src.tools.state import (
+    append_route_trace,
+    get_authenticated_user,
+    get_memory_agent,
+    get_supervisor_agent,
+    touch_activity,
+)
 from src.ui.theme import render_page_hero
 
 
 def _parse_topics(raw_text: str) -> list[str]:
     return [item.strip() for item in raw_text.split(",") if item.strip()]
-
-
-def _build_plan(
-    course_name: str,
-    exam_date: date,
-    daily_hours: float,
-    weak_topics: list[str],
-    other_topics: list[str],
-) -> dict:
-    today = date.today()
-    days_until_exam = max((exam_date - today).days, 1)
-
-    priority_topics = weak_topics + weak_topics + other_topics
-    if not priority_topics:
-        priority_topics = ["Revision", "Practice Questions", "Concept Review"]
-
-    tasks = []
-    for day_idx in range(days_until_exam):
-        plan_date = today + timedelta(days=day_idx)
-        topic = priority_topics[day_idx % len(priority_topics)]
-        checkpoint = (day_idx + 1) % 3 == 0
-        task_text = f"Study {topic} and write a short summary."
-        if checkpoint:
-            task_text = f"{task_text} Then complete a checkpoint quiz."
-
-        tasks.append(
-            {
-                "date": plan_date.isoformat(),
-                "course": course_name,
-                "topic": topic,
-                "hours": round(daily_hours, 1),
-                "task": task_text,
-                "checkpoint": checkpoint,
-                "completed": False,
-            }
-        )
-
-    return {
-        "course_name": course_name,
-        "exam_date": exam_date.isoformat(),
-        "daily_hours": daily_hours,
-        "weak_topics": weak_topics,
-        "other_topics": other_topics,
-        "tasks": tasks,
-    }
 
 
 def render_study_plan_page(project_root: Path) -> None:
@@ -105,22 +66,26 @@ def render_study_plan_page(project_root: Path) -> None:
     if submit_plan:
         weak_topics = _parse_topics(weak_topics_input)
         other_topics = _parse_topics(other_topics_input)
-        plan = _build_plan(course_name, exam_date, daily_hours, weak_topics, other_topics)
-        st.session_state.study_plans.append(plan)
-        st.session_state.active_plan = plan
-        touch_activity()
-        st.success("Study plan generated.")
-
-        sync_result = memory_agent.sync_study_plan(
-            course_name=course_name,
-            exam_date=exam_date,
-            daily_hours=daily_hours,
-            weak_topics=weak_topics,
-            other_topics=other_topics,
-            tasks=plan["tasks"],
+        plan_result = get_supervisor_agent().create_study_plan(
+            {
+                "course_name": course_name,
+                "exam_date": exam_date,
+                "daily_hours": daily_hours,
+                "weak_topics": weak_topics,
+                "other_topics": other_topics,
+            },
+            memory_agent=memory_agent,
             student_email=student_email,
             student_name=student_name,
         )
+        append_route_trace(plan_result["trace"])
+        plan = plan_result["plan"]
+        st.session_state.study_plans.append(plan)
+        st.session_state.active_plan = plan
+        touch_activity()
+        st.success(plan_result["summary"])
+
+        sync_result = plan_result["sync_result"]
         if sync_result["ok"]:
             st.info("Study plan synced to Supabase memory.")
         else:
