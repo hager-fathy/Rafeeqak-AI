@@ -1,7 +1,7 @@
 # Rafeeqak Smart Study Planner - Project Brief And Enhanced Roadmap
 
 > **One-sentence pitch:**
-> Rafeeqak is a multilingual, multi-course agentic study assistant that helps students organize courses, upload materials, generate personalized plans, practice with quizzes, review flashcards, track weak topics, and prepare smarter for exams.
+> Rafeeqak is a multilingual, multi-course agentic study assistant that helps students organize courses, upload materials, generate personalized plans, practice with quizzes, track weak topics, and prepare smarter for exams.
 
 - **Course context:** Deep Generative Models - Fourth Year Course Project
 - **Target domain:** Education - study planning, exam preparation, course assistant, and personalized learning support
@@ -22,7 +22,6 @@ Rafeeqak should become a study hub where each course has its own:
 - chat history,
 - study plan,
 - quiz attempts,
-- flashcards,
 - weak topics,
 - progress dashboard,
 - deadlines.
@@ -38,14 +37,13 @@ Rafeeqak should become a study hub where each course has its own:
 5. **Personalized planning** - Plans consider course difficulty, deadlines, daily hours, progress, and weak topics.
 6. **Better quizzes** - Quizzes use selected-course materials and support difficulty levels plus multiple question types.
 7. **Better evaluation** - Evaluation supports partial scoring, weak-topic tracking, and personalized recommendations.
-8. **Flashcards** - Flashcards are organized by course for simple review.
-9. **Polished UI** - Improve spacing, colors, labels, buttons, and helpful empty states.
-10. **Full Arabic localization** - Translate UI labels, alerts, errors, and assistant responses; support RTL layout.
-11. **Language toggle** - The student can switch Arabic/English and the preference is saved.
-12. **Friendly errors** - Replace technical errors with clear student-facing messages.
-13. **Reusable prompt templates** - Store prompts in reusable templates instead of hardcoded strings.
-14. **Dashboard by course** - Show progress, scores, weak topics, uploads, and deadlines per course.
-15. **Settings page** - Allow editing name, language, daily study hours, quiz preferences, difficulty, and study preferences.
+8. **Polished UI** - Improve spacing, colors, labels, buttons, and helpful empty states.
+9. **Full Arabic localization** - Translate UI labels, alerts, errors, and assistant responses; support RTL layout.
+10. **Language toggle** - The student can switch Arabic/English and the preference is saved.
+11. **Friendly errors** - Replace technical errors with clear student-facing messages.
+12. **Reusable prompt templates** - Store prompts in reusable templates instead of hardcoded strings.
+13. **Dashboard by course** - Show progress, scores, weak topics, uploads, and deadlines per course.
+14. **Settings page** - Allow editing name, language, daily study hours, quiz preferences, difficulty, and study preferences.
 
 ---
 
@@ -96,7 +94,6 @@ Course-Scoped State And Storage
   +-- vector index
   +-- study plans
   +-- quiz attempts
-  +-- flashcards
   +-- weak topics
   +-- chat history
   +-- progress snapshots
@@ -115,7 +112,6 @@ Every student-facing feature should include a course identifier.
 | Study plans | `course_id`, `exam_date`, `difficulty`, `daily_hours`, `tasks` |
 | Study tasks | `course_id`, `topic`, `date`, `completed`, `delayed` |
 | Quiz attempts | `course_id`, `topic`, `difficulty`, `score`, `question_types` |
-| Flashcards | `course_id`, `topic`, `front`, `back` |
 | Weak topics | `course_id`, `topic`, `source`, `confidence`, `last_seen` |
 | Chat history | `course_id`, `messages`, `created_at` |
 | Settings | user-level defaults plus optional course-level preferences |
@@ -130,7 +126,7 @@ Every student-facing feature should include a course identifier.
 |---|---|---|
 | 1 | Input Router Agent | Detects intent and language. |
 | 2 | Supervisor Agent | Routes each request to the correct specialist agent. |
-| 3 | Study Planner Agent | Creates and reschedules course-specific study plans. |
+| 3 | Study Planner Agent | Creates course-specific study plans. |
 | 4 | Course RAG Agent | Retrieves selected-course material and answers with citations. |
 | 5 | Quiz Generator Agent | Generates course-specific quizzes from topics and materials. |
 | 6 | Progress Evaluator Agent | Grades answers, including partial scoring for text answers. |
@@ -147,9 +143,9 @@ Every student-facing feature should include a course identifier.
 | Course memory | Course name, difficulty, exam date, deadline, syllabus topics. |
 | Material memory | Uploaded files and indexed chunks per course. |
 | Progress memory | Completed tasks, delayed tasks, quiz scores, average score. |
-| Weakness memory | Weak topics by course from quizzes, flashcards, and chat. |
+| Weakness memory | Weak topics by course from quizzes and chat. |
 | Episodic memory | Per-course chat summaries and important past interactions. |
-| Preference memory | Preferred difficulty, question types, study methods, notification choices. |
+| Preference memory | Preferred difficulty, question types, and study methods. |
 
 ### 6.3 Tool Integration
 
@@ -183,7 +179,6 @@ Every student-facing feature should include a course identifier.
 | Study Plan | Course difficulty, exam deadlines, and progress-aware planning. |
 | Upload Materials | Save and index files under selected course; allow delete per course. |
 | Quiz | Course-based quizzes, difficulty selector, MCQ, true/false, short answer, matching. |
-| Flashcards | Course-based generated flashcards for quick review. |
 | Dashboard | Course cards, completed tasks, upcoming tasks, scores, weak topics, uploads, and deadlines. |
 | Settings | Name, language, daily hours, difficulty, quiz preferences, study preferences. |
 | Account | Logout and account status. |
@@ -311,7 +306,7 @@ Legend:
 - [x] Add global active-course selector.
 - [x] Save `active_course_id` and `active_course_name` in session state.
 - [x] Require course selection before chat, upload, quiz, dashboard, or study plan actions.
-- [~] Separate materials, plans, quizzes, flashcards, weak topics, progress, and chat by course.
+- [~] Separate materials, plans, quizzes, weak topics, progress, and chat by course.
 - [x] Add friendly no-course empty states.
 
 ### Phase 9 - Localization And UI Polish
@@ -340,11 +335,10 @@ Legend:
 - [ ] Consider exam deadlines, daily available time, current progress, and weak topics.
 - [ ] Add delayed-task detection and recovery recommendations.
 
-### Phase 12 - Dashboard, Flashcards, And Settings
+### Phase 12 - Dashboard And Settings
 
 - [ ] Dashboard shows progress per course.
 - [ ] Dashboard includes completed tasks, upcoming tasks, quiz scores, average score, weak topics, uploads, and deadlines.
-- [ ] Organize flashcards by course.
 - [ ] Add settings page for name, language, daily hours, quiz preferences, difficulty, and study preferences.
 
 ### Phase 13 - Testing And Demo
@@ -393,9 +387,8 @@ Legend:
 | Reusable prompt templates | Pending |
 | Multiple quiz question types | Complete |
 | Partial scoring for text answers | Complete |
-| Course flashcard organization | Pending |
 | Settings page | Pending |
-| Per-course dashboard analytics | Pending |
+| Per-course dashboard summaries | Pending |
 
 ---
 
@@ -440,4 +433,4 @@ Note: `langchain` and `langgraph` are installed but not currently used in the im
 
 Rafeeqak already has a strong single-course demo core: authentication, planning, uploads, RAG, quizzes, weak-topic tracking, semantic cache, structured queries, and LLM integration.
 
-The next major goal is to turn this into a true multi-course study assistant. The most important upgrade is course scoping: every material, chat message, quiz, flashcard, weak topic, progress metric, and study plan must belong to a selected course. After that, localization, prompt templates, better quiz/evaluation logic, dashboard analytics, and settings will make the project feel complete and polished.
+The next major goal is to turn this into a true multi-course study assistant. The most important upgrade is course scoping: every material, chat message, quiz, weak topic, progress metric, and study plan must belong to a selected course. After that, localization, prompt templates, better quiz/evaluation logic, dashboard summaries, and settings will make the project feel complete and polished.
