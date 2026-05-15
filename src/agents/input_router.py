@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.localization import detect_language
+
 
 class InputRouterAgent:
     """Detects intent and language before the supervisor chooses an agent."""
@@ -23,17 +25,17 @@ class InputRouterAgent:
     }
 
     ARABIC_KEYWORDS = {
-        "quiz": ["اختبار", "اسئلة", "أسئلة", "كويز", "تدريب", "فلاش كارد"],
+        "quiz": ["اختبار", "اسئلة", "أسئلة", "كويز", "تدريب", "فلاش كارد", "اختبرني"],
         "course_material": ["ملف", "محاضرة", "ملاحظات", "شرح", "المادة", "ملخص", "pdf"],
-        "database_query": ["موعد", "مواعيد", "تقدم", "أنجزت", "المتبقي", "درجات", "درجة", "متوسط", "ضعفي"],
+        "database_query": ["موعد", "مواعيد", "تقدم", "التقدم", "أنجزت", "المتبقي", "درجات", "درجة", "متوسط", "ضعفي"],
         "memory": ["تذكر", "ذاكرة", "محفوظ", "حفظت"],
-        "study_plan": ["خطة", "جدول", "اذاكر", "أذاكر", "مراجعة", "امتحان", "اليوم", "بكرة"],
+        "study_plan": ["خطة", "جدول", "اذاكر", "أذاكر", "مراجعة", "امتحان", "الامتحان", "اليوم", "بكرة"],
     }
 
     def route(self, user_message: str) -> dict:
         message = user_message.strip()
         lowered = message.lower()
-        language = "ar" if self._contains_arabic(message) else "en"
+        language = detect_language(message)
         keyword_map = self.ARABIC_KEYWORDS if language == "ar" else self.ENGLISH_KEYWORDS
         scores = {intent: 0 for intent in self.ENGLISH_KEYWORDS}
         signals: list[str] = []
@@ -58,7 +60,7 @@ class InputRouterAgent:
         }
 
     def _contains_arabic(self, text: str) -> bool:
-        return any("\u0600" <= ch <= "\u06FF" for ch in text)
+        return detect_language(text) == "ar"
 
     def _confidence(self, score: int) -> float:
         if score <= 0:

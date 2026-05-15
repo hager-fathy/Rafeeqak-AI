@@ -1,5 +1,5 @@
 class SafetyAgent:
-    """Phase 8 placeholder: prompt injection and output filtering."""
+    """Lightweight prompt-injection screen for unsafe routing requests."""
 
     def check(self, user_message: str) -> dict:
         lower = user_message.lower()

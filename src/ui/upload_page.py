@@ -4,10 +4,12 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from src.localization import t
 from src.retrieval import CourseMaterialIndexer
 from src.tools.state import (
     course_context,
     get_active_course,
+    get_selected_language,
     require_active_course_message,
     touch_activity,
     update_active_course_bucket,
@@ -16,6 +18,7 @@ from src.ui.theme import render_page_hero
 
 
 def render_upload_page(project_root: Path) -> None:
+    language = get_selected_language()
     root_uploads_dir = project_root / "data" / "uploads"
     vector_store_dir = project_root / "data" / "vector_store"
     active_course = get_active_course()
@@ -31,15 +34,16 @@ def render_upload_page(project_root: Path) -> None:
     total_size_mb = round(sum(file.stat().st_size for file in stored_files) / (1024 * 1024), 2) if stored_files else 0.0
 
     render_page_hero(
-        "Course Material Hub",
-        "Centralize lecture notes and source files to prepare for retrieval and grounded answers.",
+        t("upload.title", language),
+        t("upload.subtitle", language),
         chips=[
-            f"Course: {course_name or 'None selected'}",
-            f"Files stored: {len(stored_files)}",
-            f"Indexed chunks: {index_stats['chunks']}",
-            f"Disk usage: {total_size_mb} MB",
+            f"{t('planner.course_name', language)}: {course_name or t('course.none_selected', language)}",
+            t("upload.files_chip", language, count=len(stored_files)),
+            t("upload.chunks_chip", language, count=index_stats["chunks"]),
+            t("upload.disk_chip", language, size=total_size_mb),
         ],
-        accent_chip="Upload center",
+        accent_chip=t("upload.accent", language),
+        language=language,
     )
 
     course_warning = require_active_course_message()
@@ -50,17 +54,17 @@ def render_upload_page(project_root: Path) -> None:
 
     with upload_col:
         with st.container(border=True):
-            st.markdown("#### Add materials")
+            st.markdown(f"#### {t('upload.add_materials', language)}")
             files = st.file_uploader(
-                "Upload PDFs, slides, or notes",
+                t("upload.uploader", language),
                 type=["pdf", "txt", "md", "docx", "pptx"],
                 accept_multiple_files=True,
                 disabled=active_course is None,
             )
 
-            if st.button("Save uploaded files", type="primary", use_container_width=True, disabled=active_course is None):
+            if st.button(t("upload.save", language), type="primary", use_container_width=True, disabled=active_course is None):
                 if not files:
-                    st.warning("Select at least one file first.")
+                    st.warning(t("upload.select_file", language))
                 else:
                     index_results = []
                     for file in files:
@@ -83,28 +87,28 @@ def render_upload_page(project_root: Path) -> None:
                     touch_activity()
                     indexed_count = sum(1 for result in index_results if result["ok"])
                     chunk_count = sum(result.get("chunks", 0) for result in index_results if result["ok"])
-                    st.success(f"Saved {len(files)} file(s) and indexed {chunk_count} chunk(s).")
+                    st.success(t("upload.saved", language, files=len(files), chunks=chunk_count))
                     failed_results = [result for result in index_results if not result["ok"]]
                     if failed_results:
                         failed_names = ", ".join(f"{item['file_name']}: {item['reason']}" for item in failed_results)
-                        st.warning(f"{len(failed_results)} file(s) could not be indexed. {failed_names}")
+                        st.warning(t("upload.failed", language, count=len(failed_results), details=failed_names))
                     elif indexed_count:
-                        st.info("The Course RAG Agent can now retrieve from these materials in Chat.")
+                        st.info(t("upload.rag_ready", language))
                     st.rerun()
 
     with library_col:
         with st.container(border=True):
-            st.markdown("#### Library snapshot")
-            st.metric("Stored files", len(stored_files), border=True)
-            st.metric("Indexed chunks", index_stats["chunks"], border=True)
-            st.metric("Total size", f"{total_size_mb} MB", border=True)
+            st.markdown(f"#### {t('upload.library', language)}")
+            st.metric(t("upload.stored_files", language), len(stored_files), border=True)
+            st.metric(t("upload.indexed_chunks", language), index_stats["chunks"], border=True)
+            st.metric(t("upload.total_size", language), f"{total_size_mb} MB", border=True)
 
-    st.markdown("### Uploaded files")
+    st.markdown(f"### {t('upload.files_heading', language)}")
     if not stored_files:
-        st.info("No files uploaded yet.")
+        st.info(t("upload.no_files", language))
         return
 
-    st.caption("Delete removes the source file and its indexed chunks from Course RAG.")
+    st.caption(t("upload.delete_caption", language))
     table_rows = []
     for file_path in stored_files:
         stat = file_path.stat()
@@ -121,13 +125,13 @@ def render_upload_page(project_root: Path) -> None:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "file_name": st.column_config.TextColumn("File Name", width="large"),
-            "size_kb": st.column_config.NumberColumn("Size (KB)", format="%.2f"),
-            "last_modified_utc": st.column_config.TextColumn("Updated (UTC)", width="medium"),
+            "file_name": st.column_config.TextColumn(t("upload.col.file_name", language), width="large"),
+            "size_kb": st.column_config.NumberColumn(t("upload.col.size", language), format="%.2f"),
+            "last_modified_utc": st.column_config.TextColumn(t("upload.col.updated", language), width="medium"),
         },
     )
 
-    st.markdown("#### Manage files")
+    st.markdown(f"#### {t('upload.manage', language)}")
     for file_path in stored_files:
         stat = file_path.stat()
         file_col, size_col, action_col = st.columns([3, 1, 1], gap="small")
@@ -136,7 +140,7 @@ def render_upload_page(project_root: Path) -> None:
         with size_col:
             st.caption(f"{round(stat.st_size / 1024, 2)} KB")
         with action_col:
-            if st.button("Delete", key=f"delete_upload_{file_path.name}", use_container_width=True):
+            if st.button(t("common.delete", language), key=f"delete_upload_{file_path.name}", use_container_width=True):
                 result = indexer.remove_file(file_path, course_id=course_id)
                 if result["ok"]:
                     uploads = [
@@ -147,11 +151,11 @@ def render_upload_page(project_root: Path) -> None:
                     update_active_course_bucket(uploads=uploads)
                     touch_activity()
                     st.success(
-                        f"Deleted {file_path.name} and removed {result['removed_chunks']} indexed chunk(s)."
+                        t("upload.deleted", language, file_name=file_path.name, chunks=result["removed_chunks"])
                     )
                     st.rerun()
                 else:
-                    st.warning(f"Could not delete {file_path.name}. Reason: {result['reason']}")
+                    st.warning(t("upload.delete_failed", language, file_name=file_path.name, reason=result["reason"]))
 
 
 def _stored_material_files(uploads_dir: Path) -> list[Path]:

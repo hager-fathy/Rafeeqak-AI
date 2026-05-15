@@ -7,6 +7,7 @@ import streamlit as st
 
 from src.agents.memory_agent import MemoryAgent
 from src.agents.supervisor import SupervisorAgent
+from src.localization import normalize_language, t
 
 
 COURSE_SCOPED_KEYS = (
@@ -53,6 +54,9 @@ def init_state() -> None:
         "active_course_id": None,
         "active_course_name": None,
         "course_data": {},
+        "selected_language": "en",
+        "language_profile_loaded": False,
+        "language_sync_notice": None,
     }
 
     for key, value in defaults.items():
@@ -119,8 +123,29 @@ def set_active_course(course_id: str | None) -> None:
 
 def require_active_course_message() -> str | None:
     if get_active_course() is None:
-        return "Create or select a course first so this work stays separated from your other subjects."
+        return t("state.course_required", get_selected_language())
     return None
+
+
+def get_selected_language() -> str:
+    language = normalize_language(st.session_state.get("selected_language"))
+    st.session_state["selected_language"] = language
+    return language
+
+
+def set_selected_language(language: str | None) -> bool:
+    normalized = normalize_language(language)
+    changed = normalized != st.session_state.get("selected_language")
+    st.session_state["selected_language"] = normalized
+    return changed
+
+
+def mark_language_profile_loaded() -> None:
+    st.session_state["language_profile_loaded"] = True
+
+
+def should_load_language_from_profile() -> bool:
+    return not bool(st.session_state.get("language_profile_loaded"))
 
 
 def get_active_course_bucket() -> dict:
@@ -166,6 +191,7 @@ def course_context() -> dict:
         "chat_history": bucket.get("chat_history", []),
         "generated_questions": bucket.get("generated_questions", []),
         "all_courses": _all_course_summaries(),
+        "selected_language": get_selected_language(),
     }
 
 
@@ -272,6 +298,7 @@ def clear_authenticated_user() -> None:
     st.session_state["auth_user"] = None
     st.session_state["auth_access_token"] = None
     st.session_state["auth_refresh_token"] = None
+    st.session_state["language_profile_loaded"] = False
 
 
 def get_authenticated_user() -> dict | None:

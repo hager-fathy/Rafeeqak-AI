@@ -12,6 +12,7 @@ from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
 from src.agents.safety_agent import SafetyAgent
 from src.agents.study_planner import StudyPlannerAgent
+from src.localization import detect_language, normalize_language, t
 from src.tools.semantic_cache import SemanticResponseCache
 
 
@@ -61,7 +62,9 @@ class SupervisorAgent:
     ) -> dict[str, Any]:
         context = context or {}
         trace: list[dict[str, Any]] = []
-        message_language = "ar" if self.router._contains_arabic(user_message) else "en"
+        preferred_language = normalize_language(context.get("selected_language"))
+        input_language = detect_language(user_message)
+        response_language = "ar" if input_language == "ar" else preferred_language
 
         safety_result = self.safety.check(user_message)
         trace.append(
@@ -75,15 +78,17 @@ class SupervisorAgent:
         )
         if not safety_result["safe"]:
             return {
-                "response": self._safety_response(message_language),
+                "response": self._safety_response(response_language),
                 "intent": "safety",
-                "language": message_language,
+                "language": response_language,
                 "agent": "safety_agent",
                 "trace": trace,
                 "payload": safety_result,
             }
 
         routed_input = self.router.route(user_message)
+        if routed_input["language"] != "ar":
+            routed_input["language"] = response_language
         trace.append(
             self._trace_step(
                 "route_input",
@@ -328,7 +333,8 @@ class SupervisorAgent:
     def _run_study_planner(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         message = routed_input["message"].lower()
         active_plan = context.get("active_plan")
-        if "weak" in message or "priority" in message or "prioritize" in message:
+        priority_terms = ("weak", "priority", "prioritize", "ضعف", "أولوية", "اولويه")
+        if any(term in message for term in priority_terms):
             planner_result = self.study_planner.explain_priorities(active_plan)
             action = "explained weak-topic prioritization"
         else:
@@ -378,10 +384,7 @@ class SupervisorAgent:
             question_types=context.get("question_types") or ["mcq"],
             previous_questions=context.get("generated_questions") or [],
         )
-        if routed_input["language"] == "ar":
-            response = f"جهزت لك اختبارا من {quiz_result['count']} أسئلة عن {topic}. افتح صفحة Quiz للإجابة عليه."
-        else:
-            response = f"I prepared a {quiz_result['count']}-question quiz on {topic}. Open the Quiz page to answer it."
+        response = t("agent.quiz.prepared", routed_input["language"], count=quiz_result["count"], topic=topic)
         return {
             "response": response,
             "payload": quiz_result,
@@ -408,10 +411,8 @@ class SupervisorAgent:
             course_id=context.get("active_course_id"),
             course_name=context.get("active_course_name"),
         )
-        response = rag_result["response"]
-
         return {
-            "response": response,
+            "response": rag_result["response"],
             "payload": rag_result,
             "trace_steps": [
                 self._trace_step(
@@ -465,13 +466,9 @@ class SupervisorAgent:
         else:
             status = memory_agent.status()
 
-        response = "Memory Agent is active and ready."
+        response = t("agent.memory.ready", routed_input["language"])
         if not status["enabled"]:
-            response = f"Memory Agent is active locally, but cloud memory is not configured: {status['reason']}"
-        if routed_input["language"] == "ar":
-            response = "وكيل الذاكرة يعمل وجاهز."
-            if not status["enabled"]:
-                response = f"وكيل الذاكرة يعمل محليا، لكن الذاكرة السحابية غير مفعلة: {status['reason']}"
+            response = t("agent.memory.local", routed_input["language"], reason=status["reason"])
 
         return {
             "response": response,
@@ -483,15 +480,9 @@ class SupervisorAgent:
 
     def _run_response_agent(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         has_active_plan = context.get("active_plan") is not None
-        response = "I can help with your active plan, quizzes, uploaded materials, or progress memory."
-        if not has_active_plan:
-            response = "I am ready to help with planning, revision, and quizzes. Ask me what to study next."
-        if routed_input["language"] == "ar":
-            response = "أقدر أساعدك في الخطة الحالية، الاختبارات، المواد المرفوعة، أو متابعة تقدمك."
-            if not has_active_plan:
-                response = "أنا جاهز أساعدك في التخطيط والمراجعة والاختبارات. اسألني ماذا تذاكر بعد ذلك."
+        response_key = "agent.response.ready" if has_active_plan else "agent.response.no_plan"
         return {
-            "response": response,
+            "response": t(response_key, routed_input["language"]),
             "payload": {"has_active_plan": has_active_plan},
             "trace_steps": [
                 self._trace_step(
@@ -505,14 +496,10 @@ class SupervisorAgent:
         }
 
     def _safety_response(self, language: str) -> str:
-        if language == "ar":
-            return "لا أستطيع المساعدة في طلبات تحاول تجاوز قواعد المساعد."
-        return "I cannot help with requests that try to bypass the assistant rules."
+        return t("agent.safety", language)
 
     def _course_required_response(self, language: str) -> str:
-        if language == "ar":
-            return "Ø§Ø®ØªØ± Ø£Ùˆ Ø£Ù†Ø´Ø¦ Ù…Ù‚Ø±Ø±Ø§ Ø£ÙˆÙ„Ø§ Ø­ØªÙ‰ Ø£Ø­ÙØ¸ Ø§Ù„Ù…Ø­Ø§Ø¯Ø«Ø© ÙˆØ§Ù„Ù…ÙˆØ§Ø¯ ÙÙŠ Ù…ÙƒØ§Ù†Ù‡Ø§ Ø§Ù„ØµØ­ÙŠØ­."
-        return "Create or select a course first so I can keep this chat, materials, quizzes, and progress in the right course."
+        return t("agent.course_required", language)
 
     def _study_planner_response(
         self,
@@ -523,21 +510,25 @@ class SupervisorAgent:
         if language != "ar":
             return planner_result["response"]
         if not active_plan:
-            if planner_result["ok"]:
-                return "لا توجد خطة نشطة حاليا. افتح صفحة Study Plan وأنشئ خطة أولا."
-            if "prioritize" in planner_result["response"].lower():
-                return "أضف نقاط ضعفك في صفحة Study Plan، وبعدها أقدر أرتبها حسب الأولوية في جدولك."
-            return "لا توجد خطة دراسة بعد. افتح صفحة Study Plan وأنشئ خطة أولا."
+            if "prioritize" in planner_result.get("response", "").lower():
+                return t("agent.planner.add_weak", language)
+            return t("agent.planner.no_active", language)
 
         task = planner_result.get("task")
         if task:
-            checkpoint_note = " وتتضمن أيضا اختبارا قصيرا." if task.get("checkpoint") else ""
-            return f"اليوم ركز على {task['topic']} لمدة {task['hours']} ساعة. الهدف: ادرس الموضوع واكتب ملخصا قصيرا.{checkpoint_note}"
+            checkpoint_note = t("agent.planner.checkpoint", language) if task.get("checkpoint") else ""
+            return t(
+                "agent.planner.today",
+                language,
+                topic=task["topic"],
+                hours=task["hours"],
+                checkpoint_note=checkpoint_note,
+            )
 
         weak_topics = active_plan.get("weak_topics", [])
         if weak_topics:
-            return f"خطتك الحالية تعطي نقاط الضعف فرصا إضافية قبل باقي الموضوعات. موضوعات الأولوية: {', '.join(weak_topics)}."
-        return "خطتك الحالية لا تحتوي على نقاط ضعف محددة، لذلك توزع المراجعة بالتساوي بين الموضوعات."
+            return t("agent.planner.priorities", language, topics=", ".join(weak_topics))
+        return t("agent.planner.no_weak", language)
 
     def _context_fingerprint(self, context: dict[str, Any]) -> str:
         active_plan = context.get("active_plan") or {}
@@ -548,6 +539,7 @@ class SupervisorAgent:
             "course": active_plan.get("course_name") if isinstance(active_plan, dict) else None,
             "active_course_id": context.get("active_course_id"),
             "active_course_name": context.get("active_course_name"),
+            "language": normalize_language(context.get("selected_language")),
             "exam_date": active_plan.get("exam_date") if isinstance(active_plan, dict) else None,
             "tasks": len(tasks),
             "completed_tasks": sum(1 for task in tasks if task.get("completed")),

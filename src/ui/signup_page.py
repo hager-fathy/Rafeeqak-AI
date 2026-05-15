@@ -3,45 +3,51 @@ from pathlib import Path
 import streamlit as st
 
 from src.auth import AuthService
-from src.tools.state import set_authenticated_user
+from src.localization import t
+from src.tools.state import get_selected_language, set_authenticated_user
 from src.ui.theme import render_page_hero
 
 
 def render_signup_page(project_root: Path) -> None:
     del project_root
+    language = get_selected_language()
 
     render_page_hero(
-        "Create Account",
-        "Sign up once to save your study memory and continue from any session.",
-        chips=["Personal profile", "Cloud memory"],
-        accent_chip="Sign up",
+        t("signup.title", language),
+        t("signup.subtitle", language),
+        chips=[t("signup.chip.profile", language), t("signup.chip.memory", language)],
+        accent_chip=t("signup.accent", language),
+        language=language,
     )
 
     auth_service = AuthService()
     if not auth_service.is_available:
-        st.error(f"Authentication is not configured: {auth_service.unavailability_reason}")
+        st.error(t("auth.not_configured", language, reason=auth_service.unavailability_reason))
         return
 
     left_col, form_col, right_col = st.columns([1, 1.4, 1], gap="small")
     with form_col:
         with st.container(border=True):
-            st.markdown("#### New account")
+            st.markdown(f"#### {t('signup.form_title', language)}")
             with st.form("signup_form"):
-                full_name = st.text_input("Full name", placeholder="Demo Student")
-                email = st.text_input("Email", placeholder="you@example.com")
-                password = st.text_input("Password", type="password")
-                confirm_password = st.text_input("Confirm password", type="password")
-                submit = st.form_submit_button("Create account", type="primary", use_container_width=True)
+                full_name = st.text_input(
+                    t("signup.full_name", language),
+                    placeholder=t("signup.full_name_placeholder", language),
+                )
+                email = st.text_input(t("signup.email", language), placeholder=t("login.email_placeholder", language))
+                password = st.text_input(t("signup.password", language), type="password")
+                confirm_password = st.text_input(t("signup.confirm_password", language), type="password")
+                submit = st.form_submit_button(t("signup.submit", language), type="primary", use_container_width=True)
 
             if submit:
                 if not email.strip() or not password:
-                    st.warning("Email and password are required.")
+                    st.warning(t("signup.required", language))
                     return
                 if password != confirm_password:
-                    st.warning("Passwords do not match.")
+                    st.warning(t("signup.password_mismatch", language))
                     return
                 if len(password) < 8:
-                    st.warning("Password must be at least 8 characters.")
+                    st.warning(t("signup.password_short", language))
                     return
 
                 result = auth_service.sign_up(
@@ -54,7 +60,7 @@ def render_signup_page(project_root: Path) -> None:
                     return
 
                 if result["requires_email_confirmation"]:
-                    st.success("Account created. Please verify your email, then login.")
+                    st.success(t("signup.verify_email", language))
                     return
 
                 set_authenticated_user(
@@ -62,5 +68,5 @@ def render_signup_page(project_root: Path) -> None:
                     access_token=result["access_token"],
                     refresh_token=result["refresh_token"],
                 )
-                st.success("Account created and logged in.")
+                st.success(t("signup.success", language))
                 st.rerun()

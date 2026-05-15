@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.localization import normalize_language, t
 from src.retrieval import CourseMaterialIndexer, RetrievedChunk
 from src.tools.llm_client import LLMClient
 
@@ -33,6 +34,7 @@ class CourseRAGAgent:
         course_id: str | None = None,
         course_name: str | None = None,
     ) -> dict:
+        language = normalize_language(language)
         index_result = self.indexer.index_all(course_id=course_id, course_name=course_name)
         stats = index_result["stats"]
         if stats["chunks"] == 0:
@@ -100,35 +102,24 @@ class CourseRAGAgent:
         source_list = "; ".join(dict.fromkeys(match.citation() for match in matches))
         if language == "ar":
             answer_lines = [
-                f"بناء على المواد التي رفعتها، هذه أهم النقاط المرتبطة بسؤالك: {question}",
+                t("rag.answer_intro", language, course_name=course_name or "هذا المقرر", question=question),
                 "",
             ]
-            for index, point in enumerate(best_points, start=1):
-                answer_lines.append(f"{index}. {point}")
-            answer_lines.extend(["", f"المصادر: {source_list}"])
-            return "\n".join(answer_lines), "offline_template"
-
-        answer_lines = [
-            f"Based on your uploaded materials for {course_name or 'this course'}, here is the relevant answer to: {question}",
-            "",
-        ]
+        else:
+            answer_lines = [
+                t("rag.answer_intro", language, course_name=course_name or "this course", question=question),
+                "",
+            ]
         for index, point in enumerate(best_points, start=1):
             answer_lines.append(f"{index}. {point}")
-        answer_lines.extend(["", f"Sources: {source_list}"])
+        answer_lines.extend(["", t("rag.sources", language, sources=source_list)])
         return "\n".join(answer_lines), "offline_template"
 
     def _no_materials_response(self, language: str) -> str:
-        if language == "ar":
-            return "ارفع مواد المقرر أولا، وبعدها أقدر أجاوبك بإجابات موثقة من ملاحظاتك."
-        return "Upload course materials first, then I can answer with sources from your notes."
+        return t("rag.no_materials", language)
 
     def _no_match_response(self, language: str) -> str:
-        if language == "ar":
-            return "وجدت مواد مفهرسة، لكن لم أجد جزءا مناسبا لهذا السؤال. حاول كتابة اسم الموضوع كما هو موجود في ملاحظاتك."
-        return (
-            "I found indexed materials, but not a strong match for that question. "
-            "Try naming the topic exactly as it appears in your notes."
-        )
+        return t("rag.no_match", language)
 
     def _trim_to_sentence(self, text: str, *, max_length: int = 420) -> str:
         compact = " ".join(text.split())

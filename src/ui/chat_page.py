@@ -2,12 +2,14 @@ from pathlib import Path
 
 import streamlit as st
 
+from src.localization import t
 from src.tools.state import (
     append_route_trace,
     course_context,
     get_active_course,
     get_authenticated_user,
     get_memory_agent,
+    get_selected_language,
     get_supervisor_agent,
     require_active_course_message,
     touch_activity,
@@ -39,19 +41,25 @@ def _assistant_reply(user_message: str) -> str:
 
 def render_chat_page(project_root: Path) -> None:
     del project_root
+    language = get_selected_language()
     active_course = get_active_course()
     current_context = course_context()
     chat_history = current_context["chat_history"]
 
     render_page_hero(
-        "Study Coach Chat",
-        "Ask for daily guidance, revision priorities, and next-step recommendations from your planner.",
+        t("chat.title", language),
+        t("chat.subtitle", language),
         chips=[
-            f"Course: {active_course['name'] if active_course else 'None selected'}",
-            f"Messages: {len(chat_history)}",
-            f"Active plan: {'Yes' if current_context['active_plan'] else 'No'}",
+            f"{t('planner.course_name', language)}: {active_course['name'] if active_course else t('course.none_selected', language)}",
+            t("chat.messages_chip", language, count=len(chat_history)),
+            t(
+                "chat.active_plan_chip",
+                language,
+                status=t("common.yes", language) if current_context["active_plan"] else t("common.no", language),
+            ),
         ],
-        accent_chip="Conversation mode",
+        accent_chip=t("chat.accent", language),
+        language=language,
     )
 
     course_warning = require_active_course_message()
@@ -64,53 +72,53 @@ def render_chat_page(project_root: Path) -> None:
         conversation = st.container(border=True)
         with conversation:
             if not chat_history:
-                st.info("No messages yet. Try: What should I study today?")
+                st.info(t("chat.empty", language))
             else:
                 for item in chat_history:
                     with st.chat_message(item["role"]):
                         st.markdown(item["content"])
 
     with insights_col:
-        st.markdown("#### Quick prompts")
+        st.markdown(f"#### {t('chat.quick_prompts', language)}")
         quick_prompt = st.pills(
-            "Pick a prompt",
+            t("chat.pick_prompt", language),
             options=[
-                "What should I study today?",
-                "Focus on my weak topics",
-                "Give me a quick revision checklist",
+                t("chat.prompt.today", language),
+                t("chat.prompt.weak", language),
+                t("chat.prompt.checklist", language),
             ],
             selection_mode="single",
             default=None,
             label_visibility="collapsed",
         )
 
-        if st.button("Use selected prompt", use_container_width=True, disabled=quick_prompt is None or active_course is None):
+        if st.button(t("chat.use_prompt", language), use_container_width=True, disabled=quick_prompt is None or active_course is None):
             chat_history.append({"role": "user", "content": quick_prompt})
             chat_history.append({"role": "assistant", "content": _assistant_reply(quick_prompt)})
             update_active_course_bucket(chat_history=chat_history)
             touch_activity()
             st.rerun()
 
-        st.markdown("#### Session snapshot")
-        st.metric("Total messages", len(chat_history), border=True)
+        st.markdown(f"#### {t('chat.snapshot', language)}")
+        st.metric(t("chat.total_messages", language), len(chat_history), border=True)
         st.metric(
-            "Stored plans",
+            t("chat.stored_plans", language),
             len(current_context["study_plans"]),
             border=True,
         )
         route_traces = st.session_state.get("route_traces", [])
-        st.metric("Route traces", len(route_traces), border=True)
+        st.metric(t("chat.route_traces", language), len(route_traces), border=True)
         if route_traces:
-            with st.expander("Latest route trace", expanded=False):
+            with st.expander(t("chat.latest_trace", language), expanded=False):
                 for step in route_traces[-1]:
                     st.caption(f"{step['agent']} | {step['step']} | {step['status']}")
                     st.write(step["action"])
-        if st.button("Clear chat history", use_container_width=True):
+        if st.button(t("chat.clear", language), use_container_width=True):
             update_active_course_bucket(chat_history=[])
             touch_activity()
             st.rerun()
 
-    user_text = st.chat_input("Ask your study assistant...", disabled=active_course is None)
+    user_text = st.chat_input(t("chat.input", language), disabled=active_course is None)
     if user_text:
         chat_history.append({"role": "user", "content": user_text})
         reply = _assistant_reply(user_text)

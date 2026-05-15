@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from src.localization import normalize_language, t
+
 
 class DatabaseQueryAgent:
     """Answers structured progress, deadline, score, and weak-topic questions."""
@@ -12,6 +14,11 @@ class DatabaseQueryAgent:
     SCORE_KEYWORDS = {"score", "scores", "quiz", "average", "grade", "grades"}
     WEAK_TOPIC_KEYWORDS = {"weak", "weakness", "weaknesses", "struggle", "struggling"}
     ALL_COURSE_KEYWORDS = {"all", "overall", "courses", "course-by-course", "every"}
+    ARABIC_DEADLINE_KEYWORDS = {"موعد", "مواعيد", "امتحان", "الامتحان", "اختبار", "متى"}
+    ARABIC_PROGRESS_KEYWORDS = {"تقدم", "التقدم", "أنجزت", "انجزت", "المتبقي", "الحالة", "لوحة"}
+    ARABIC_SCORE_KEYWORDS = {"درجة", "درجات", "اختبار", "كويز", "متوسط"}
+    ARABIC_WEAK_TOPIC_KEYWORDS = {"ضعف", "ضعفي", "نقاط", "صعب", "أخطأت", "اخطأت"}
+    ARABIC_ALL_COURSE_KEYWORDS = {"كل", "جميع", "المقررات", "المواد", "عام"}
 
     def answer(
         self,
@@ -21,21 +28,22 @@ class DatabaseQueryAgent:
         memory_agent: Any | None = None,
         language: str = "en",
     ) -> dict[str, Any]:
+        language = normalize_language(language)
         query_type = self.classify(message, language=language)
         snapshot_result = self._snapshot(context=context, memory_agent=memory_agent)
         local_data = self._local_data(context)
-        wants_all_courses = self._wants_all_courses(message)
+        wants_all_courses = self._wants_all_courses(message, language=language)
 
         if wants_all_courses:
-            response = self._all_courses_response(local_data, query_type)
+            response = self._all_courses_response(local_data, query_type, language)
         elif query_type == "deadline":
-            response = self._deadline_response(local_data, snapshot_result)
+            response = self._deadline_response(local_data, snapshot_result, language)
         elif query_type == "score":
-            response = self._score_response(local_data, snapshot_result)
+            response = self._score_response(local_data, snapshot_result, language)
         elif query_type == "weak_topics":
-            response = self._weak_topics_response(local_data, snapshot_result)
+            response = self._weak_topics_response(local_data, snapshot_result, language)
         else:
-            response = self._progress_response(local_data)
+            response = self._progress_response(local_data, language)
 
         return {
             "ok": True,
@@ -49,15 +57,18 @@ class DatabaseQueryAgent:
         }
 
     def classify(self, message: str, *, language: str = "en") -> str:
-        del language
         tokens = self._tokens(message)
-        if tokens & self.DEADLINE_KEYWORDS:
+        deadline_keywords = self.DEADLINE_KEYWORDS | (self.ARABIC_DEADLINE_KEYWORDS if language == "ar" else set())
+        score_keywords = self.SCORE_KEYWORDS | (self.ARABIC_SCORE_KEYWORDS if language == "ar" else set())
+        weak_keywords = self.WEAK_TOPIC_KEYWORDS | (self.ARABIC_WEAK_TOPIC_KEYWORDS if language == "ar" else set())
+        progress_keywords = self.PROGRESS_KEYWORDS | (self.ARABIC_PROGRESS_KEYWORDS if language == "ar" else set())
+        if tokens & deadline_keywords:
             return "deadline"
-        if tokens & self.SCORE_KEYWORDS:
+        if tokens & score_keywords:
             return "score"
-        if tokens & self.WEAK_TOPIC_KEYWORDS:
+        if tokens & weak_keywords:
             return "weak_topics"
-        if tokens & self.PROGRESS_KEYWORDS:
+        if tokens & progress_keywords:
             return "progress"
         return "progress"
 
@@ -104,32 +115,44 @@ class DatabaseQueryAgent:
         except Exception as exc:  # pragma: no cover - defensive integration path
             return {"ok": False, "reason": str(exc)}
 
-    def _deadline_response(self, data: dict[str, Any], snapshot_result: dict[str, Any]) -> str:
+    def _deadline_response(self, data: dict[str, Any], snapshot_result: dict[str, Any], language: str) -> str:
         exam_date = data.get("exam_date")
-        course = data.get("active_course") or "your active course"
+        course = data.get("active_course") or ("المقرر النشط" if language == "ar" else "your active course")
         if not exam_date and snapshot_result.get("ok"):
             exams = snapshot_result.get("snapshot", {}).get("exams", [])
             if exams:
                 exam_date = exams[0].get("exam_date")
 
         if not exam_date:
-            return "No exam deadline is saved yet. Create a study plan first."
+            return t("db.no_deadline", language)
 
-        days_text = self._days_until_text(exam_date)
-        return f"The exam deadline for {course} is {exam_date}. {days_text}"
+        days_text = self._days_until_text(exam_date, language)
+        return t("db.deadline", language, course=course, exam_date=exam_date, days_text=days_text)
 
-    def _progress_response(self, data: dict[str, Any]) -> str:
+    def _progress_response(self, data: dict[str, Any], language: str) -> str:
         if data["total_tasks"] == 0:
-            return "There is no active plan to measure progress. Create a study plan first."
+            return t("db.no_progress", language)
 
         percent = round((data["completed_tasks"] / data["total_tasks"]) * 100, 1)
         next_task = data.get("next_task")
-        response = f"You completed {data['completed_tasks']} of {data['total_tasks']} tasks ({percent}%)."
+        response = t(
+            "db.progress",
+            language,
+            completed=data["completed_tasks"],
+            total=data["total_tasks"],
+            percent=percent,
+        )
         if next_task:
-            response += f" Next task: {next_task['topic']} on {next_task['date']} for {next_task['hours']}h."
+            response += t(
+                "db.next_task",
+                language,
+                topic=next_task["topic"],
+                date=next_task["date"],
+                hours=next_task["hours"],
+            )
         return response
 
-    def _score_response(self, data: dict[str, Any], snapshot_result: dict[str, Any]) -> str:
+    def _score_response(self, data: dict[str, Any], snapshot_result: dict[str, Any], language: str) -> str:
         attempts = data["quiz_attempts"]
         average = data["average_score"]
         last_quiz = data.get("last_quiz")
@@ -141,13 +164,13 @@ class DatabaseQueryAgent:
                 last_quiz = recent[0]
 
         if attempts == 0:
-            return "No quiz attempts are recorded yet."
+            return t("db.no_scores", language)
 
         topic = last_quiz.get("topic", "latest quiz") if last_quiz else "latest quiz"
         score = last_quiz.get("score_percent", average) if last_quiz else average
-        return f"You have {attempts} quiz attempt(s). Average score is {average}%. Latest score was {score}% on {topic}."
+        return t("db.scores", language, attempts=attempts, average=average, score=score, topic=topic)
 
-    def _weak_topics_response(self, data: dict[str, Any], snapshot_result: dict[str, Any]) -> str:
+    def _weak_topics_response(self, data: dict[str, Any], snapshot_result: dict[str, Any], language: str) -> str:
         weak_topics = data["weak_topics"]
         if snapshot_result.get("ok"):
             snapshot_topics = [
@@ -158,60 +181,73 @@ class DatabaseQueryAgent:
             weak_topics = sorted(set(weak_topics + snapshot_topics))
 
         if not weak_topics:
-            return "No weak topics are saved yet."
+            return t("db.no_weak", language)
 
         topics = ", ".join(weak_topics[:6])
-        return f"Current weak topics: {topics}. Prioritize them in revision and short quizzes."
+        return t("db.weak", language, topics=topics)
 
-    def _all_courses_response(self, data: dict[str, Any], query_type: str) -> str:
+    def _all_courses_response(self, data: dict[str, Any], query_type: str, language: str) -> str:
         courses = data.get("all_courses", [])
         if not courses:
-            return "No courses are saved yet."
+            return t("db.no_courses", language)
 
         if query_type == "score":
-            rows = [
-                f"{course['course_name']}: {course['quiz_attempts']} attempt(s), {course['average_score']}% average"
-                for course in courses
-            ]
-            return "All-course quiz summary: " + "; ".join(rows)
+            if language == "ar":
+                rows = [
+                    f"{course['course_name']}: {course['quiz_attempts']} محاولة، متوسط {course['average_score']}%"
+                    for course in courses
+                ]
+            else:
+                rows = [
+                    f"{course['course_name']}: {course['quiz_attempts']} attempt(s), {course['average_score']}% average"
+                    for course in courses
+                ]
+            return t("db.all_scores", language, rows="; ".join(rows))
         if query_type == "weak_topics":
             rows = [
-                f"{course['course_name']}: {', '.join(course['weak_topics'][:4]) or 'no weak topics'}"
+                f"{course['course_name']}: {', '.join(course['weak_topics'][:4]) or t('db.no_weak_short', language)}"
                 for course in courses
             ]
-            return "All-course weak-topic summary: " + "; ".join(rows)
+            return t("db.all_weak", language, rows="; ".join(rows))
         if query_type == "deadline":
             rows = [
-                f"{course['course_name']}: {course['exam_date'] or 'no deadline'}"
+                f"{course['course_name']}: {course['exam_date'] or t('db.no_deadline_short', language)}"
                 for course in courses
             ]
-            return "All-course deadline summary: " + "; ".join(rows)
+            return t("db.all_deadlines", language, rows="; ".join(rows))
 
         rows = []
         for course in courses:
             total = course["total_tasks"]
             completed = course["completed_tasks"]
             percent = round((completed / total) * 100, 1) if total else 0.0
-            rows.append(
-                f"{course['course_name']}: {completed}/{total} tasks ({percent}%), "
-                f"{course['uploads']} upload(s), {course['quiz_attempts']} quiz attempt(s)"
-            )
-        return "All-course progress summary: " + "; ".join(rows)
+            if language == "ar":
+                rows.append(
+                    f"{course['course_name']}: {completed}/{total} مهمة ({percent}%)، "
+                    f"{course['uploads']} ملف، {course['quiz_attempts']} محاولة اختبار"
+                )
+            else:
+                rows.append(
+                    f"{course['course_name']}: {completed}/{total} tasks ({percent}%), "
+                    f"{course['uploads']} upload(s), {course['quiz_attempts']} quiz attempt(s)"
+                )
+        return t("db.all_progress", language, rows="; ".join(rows))
 
-    def _days_until_text(self, raw_date: str) -> str:
+    def _days_until_text(self, raw_date: str, language: str = "en") -> str:
         try:
             exam_date = date.fromisoformat(str(raw_date))
         except ValueError:
             return ""
         days = (exam_date - date.today()).days
         if days > 0:
-            return f"{days} day(s) remaining."
+            return t("db.days_remaining", language, days=days)
         if days == 0:
-            return "The exam is today."
-        return f"It was {abs(days)} day(s) ago."
+            return t("db.exam_today", language)
+        return t("db.exam_past", language, days=abs(days))
 
     def _tokens(self, message: str) -> set[str]:
-        return {token.strip(".,?!:;?").lower() for token in str(message).split() if token.strip()}
+        return {token.strip(".,?!:;؟،؛").lower() for token in str(message).split() if token.strip()}
 
-    def _wants_all_courses(self, message: str) -> bool:
-        return bool(self._tokens(message) & self.ALL_COURSE_KEYWORDS)
+    def _wants_all_courses(self, message: str, *, language: str = "en") -> bool:
+        keywords = self.ALL_COURSE_KEYWORDS | (self.ARABIC_ALL_COURSE_KEYWORDS if language == "ar" else set())
+        return bool(self._tokens(message) & keywords)

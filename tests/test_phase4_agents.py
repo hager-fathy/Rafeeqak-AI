@@ -177,6 +177,14 @@ def test_supervisor_replies_in_arabic_for_general_arabic_chat(tmp_path) -> None:
     assert "أنا جاهز" in result["response"]
 
 
+def test_supervisor_uses_selected_language_for_english_input(tmp_path) -> None:
+    supervisor = SupervisorAgent(semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"))
+    result = supervisor.handle_message("hello", context={"selected_language": "ar"})
+
+    assert result["language"] == "ar"
+    assert "أنا جاهز" in result["response"]
+
+
 def test_supervisor_creates_plan_and_skips_missing_memory() -> None:
     result = SupervisorAgent().create_study_plan(
         {

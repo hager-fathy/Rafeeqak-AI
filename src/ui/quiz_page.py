@@ -6,12 +6,14 @@ import streamlit as st
 
 from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
+from src.localization import detect_language, t
 from src.retrieval import CourseMaterialIndexer
 from src.tools.state import (
     course_context,
     get_active_course,
     get_authenticated_user,
     get_memory_agent,
+    get_selected_language,
     require_active_course_message,
     touch_activity,
     update_active_course_bucket,
@@ -20,6 +22,7 @@ from src.ui.theme import render_page_hero
 
 
 def render_quiz_page(project_root: Path) -> None:
+    language = get_selected_language()
     memory_agent = get_memory_agent()
     memory_status = memory_agent.status()
     auth_user = get_authenticated_user()
@@ -43,15 +46,16 @@ def render_quiz_page(project_root: Path) -> None:
     average_score = round(sum(item["score_percent"] for item in attempts) / len(attempts), 1) if attempts else 0.0
 
     render_page_hero(
-        "Assessment Studio",
-        "Generate focused quizzes to validate comprehension and monitor mastery over time.",
+        t("quiz.title", language),
+        t("quiz.subtitle", language),
         chips=[
-            f"Course: {course_name or 'None selected'}",
-            f"Attempts: {len(attempts)}",
-            f"Average score: {average_score}%",
-            f"RAG chunks: {indexer.stats(course_id=course_id)['chunks']}",
+            f"{t('planner.course_name', language)}: {course_name or t('course.none_selected', language)}",
+            t("quiz.attempts_chip", language, count=len(attempts)),
+            t("quiz.avg_chip", language, score=average_score),
+            t("quiz.rag_chip", language, count=indexer.stats(course_id=course_id)["chunks"]),
         ],
-        accent_chip="Quiz lab",
+        accent_chip=t("quiz.accent", language),
+        language=language,
     )
 
     course_warning = require_active_course_message()
@@ -62,50 +66,56 @@ def render_quiz_page(project_root: Path) -> None:
 
     with setup_col:
         with st.container(border=True):
-            st.markdown("#### Quiz setup")
+            st.markdown(f"#### {t('quiz.setup', language)}")
             with st.form("quiz_config_form"):
-                topic = st.text_input("Topic", value=default_topic)
+                topic = st.text_input(t("quiz.topic", language), value=default_topic)
                 difficulty = st.selectbox(
-                    "Difficulty",
+                    t("quiz.difficulty", language),
                     options=["easy", "medium", "hard"],
                     index=1,
-                    format_func=lambda value: value.title(),
+                    format_func=lambda value: t(f"quiz.difficulty.{value}", language),
                 )
                 question_type_labels = {
-                    "mcq": "MCQ",
-                    "true_false": "True/False",
-                    "short_answer": "Short answer",
-                    "matching": "Matching",
+                    "mcq": t("quiz.type.mcq", language),
+                    "true_false": t("quiz.type.true_false", language),
+                    "short_answer": t("quiz.type.short_answer", language),
+                    "matching": t("quiz.type.matching", language),
                 }
                 question_types = st.multiselect(
-                    "Question types",
+                    t("quiz.types", language),
                     options=list(question_type_labels.keys()),
                     default=["mcq"],
                     format_func=lambda value: question_type_labels[value],
                 )
                 question_count = st.number_input(
-                    "Number of questions",
+                    t("quiz.count", language),
                     min_value=1,
                     value=4,
                     step=1,
                     format="%d",
                 )
-                create_quiz = st.form_submit_button("Create quiz", use_container_width=True, disabled=active_course is None)
+                create_quiz = st.form_submit_button(t("quiz.create", language), use_container_width=True, disabled=active_course is None)
 
     with history_col:
         with st.container(border=True):
-            st.markdown("#### Performance snapshot")
-            st.metric("Attempts", len(attempts), border=True)
-            st.metric("Average", f"{average_score}%", border=True)
+            st.markdown(f"#### {t('quiz.performance', language)}")
+            st.metric(t("dashboard.quiz_attempts", language), len(attempts), border=True)
+            st.metric(t("quiz.average", language), f"{average_score}%", border=True)
             if attempts:
                 last_score = attempts[-1]["score_percent"]
-                st.metric("Last score", f"{last_score}%", border=True)
+                st.metric(t("quiz.last_score", language), f"{last_score}%", border=True)
             else:
-                st.info("No attempts yet.")
-            st.metric("Supabase memory", "Connected" if memory_status["enabled"] else "Not configured", border=True)
+                st.info(t("quiz.no_attempts", language))
+            st.metric(
+                t("planner.supabase_memory", language),
+                t("common.connected", language) if memory_status["enabled"] else t("common.not_configured", language),
+                border=True,
+            )
 
     if create_quiz:
-        language = _detect_language(topic)
+        quiz_language = detect_language(topic)
+        if quiz_language != "ar":
+            quiz_language = language
         context_matches = indexer.search(topic, top_k=3, course_id=course_id)
         context_chunks = [
             {
@@ -120,7 +130,7 @@ def render_quiz_page(project_root: Path) -> None:
             topic=topic,
             count=question_count,
             context_chunks=context_chunks,
-            language=language,
+            language=quiz_language,
             difficulty=difficulty,
             question_types=question_types,
             previous_questions=current_context.get("generated_questions", []),
@@ -133,34 +143,34 @@ def render_quiz_page(project_root: Path) -> None:
             generated_questions=generated_questions[-120:],
         )
         touch_activity()
-        source_note = f" using {len(context_chunks)} retrieved source chunk(s)" if context_chunks else ""
-        st.success(f"Quiz generated{source_note}.")
+        source_note = t("quiz.source_note", language, count=len(context_chunks)) if context_chunks else ""
+        st.success(t("quiz.generated", language, source_note=source_note))
 
     quiz = _current_quiz()
     if not quiz:
-        st.info("No active quiz yet. Create one above.")
+        st.info(t("quiz.no_quiz", language))
         return
 
     questions = quiz.get("questions", [])
     if not questions:
-        st.warning("The active quiz has no questions. Create a new quiz.")
+        st.warning(t("quiz.empty", language))
         return
 
-    st.markdown(f"### Active quiz: {quiz.get('topic', 'Revision')}")
+    st.markdown(f"### {t('quiz.active', language, topic=quiz.get('topic', 'Revision'))}")
     st.caption(
-        "Generated from uploaded materials and study-topic templates."
+        t("quiz.caption.sources", language)
         if quiz.get("source_count")
-        else "Generated from study-topic templates."
+        else t("quiz.caption.templates", language)
     )
 
     with st.container(border=True):
-        st.markdown("#### Answer questions")
+        st.markdown(f"#### {t('quiz.answer_title', language)}")
         with st.form("quiz_answers_form"):
             answers = []
             for idx, item in enumerate(questions):
-                answers.append(_render_question_input(idx, item))
+                answers.append(_render_question_input(idx, item, language))
 
-            submit_answers = st.form_submit_button("Submit answers", use_container_width=True)
+            submit_answers = st.form_submit_button(t("quiz.submit", language), use_container_width=True)
 
     if submit_answers:
         evaluation = evaluator.evaluate(
@@ -178,6 +188,7 @@ def render_quiz_page(project_root: Path) -> None:
                 memory_agent=memory_agent,
                 student_email=student_email,
                 student_name=student_name,
+                language=language,
             )
             touch_activity()
             st.success(evaluation["summary"])
@@ -185,9 +196,9 @@ def render_quiz_page(project_root: Path) -> None:
         else:
             st.warning(evaluation["message"])
 
-    _render_feedback(course_context().get("last_quiz_feedback"))
-    _render_flashcards(quiz.get("flashcards", []))
-    _render_attempt_history(course_context().get("quiz_attempts", []))
+    _render_feedback(course_context().get("last_quiz_feedback"), language)
+    _render_flashcards(quiz.get("flashcards", []), language)
+    _render_attempt_history(course_context().get("quiz_attempts", []), language)
 
 
 def _record_attempt(
@@ -198,6 +209,7 @@ def _record_attempt(
     memory_agent: Any,
     student_email: str | None,
     student_name: str | None,
+    language: str,
 ) -> None:
     attempts = course_context().get("quiz_attempts", [])
     attempts.append(
@@ -234,46 +246,48 @@ def _record_attempt(
         student_name=student_name,
     )
     if sync_result["ok"]:
-        st.info("Quiz attempt synced to Supabase memory.")
+        st.info(t("quiz.synced", language))
     else:
-        st.warning(f"Quiz attempt saved locally only. Reason: {sync_result['reason']}")
+        st.warning(t("quiz.local_only", language, reason=sync_result["reason"]))
 
 
-def _render_feedback(evaluation: dict[str, Any] | None) -> None:
+def _render_feedback(evaluation: dict[str, Any] | None, language: str) -> None:
     if not evaluation or not evaluation.get("ok"):
         return
 
-    with st.expander("Question feedback", expanded=True):
+    question_prefix = "س" if language == "ar" else "Q"
+    with st.expander(t("quiz.feedback", language), expanded=True):
         for index, item in enumerate(evaluation["feedback"], start=1):
-            status = "Correct" if item["is_correct"] else "Needs review"
-            st.markdown(f"**Q{index}. {status}**")
+            status = t("quiz.correct", language) if item["is_correct"] else t("quiz.needs_review", language)
+            st.markdown(f"**{question_prefix}{index}. {status}**")
             st.write(item["question"])
             if item.get("partial_credit"):
-                st.caption(f"Partial credit: {item['score']} point")
-            st.caption(f"Your answer: {item['selected_answer'] or 'No answer'}")
+                st.caption(t("quiz.partial", language, score=item["score"]))
+            st.caption(t("quiz.your_answer", language, answer=item["selected_answer"] or t("quiz.no_answer", language)))
             if not item["is_correct"]:
-                st.caption(f"Correct answer: {item['correct_answer']}")
+                st.caption(t("quiz.correct_answer", language, answer=item["correct_answer"]))
             if item["explanation"]:
                 st.info(item["explanation"])
 
 
-def _render_question_input(index: int, item: dict[str, Any]) -> Any:
+def _render_question_input(index: int, item: dict[str, Any], language: str) -> Any:
     question_type = item.get("type", "mcq")
+    question_prefix = "س" if language == "ar" else "Q"
     if question_type in {"mcq", "true_false"}:
         return st.radio(
-            f"Q{index + 1}. {item['question']}",
+            f"{question_prefix}{index + 1}. {item['question']}",
             options=list(range(len(item["options"]))),
             format_func=lambda option_idx, opts=item["options"]: opts[option_idx],
             key=f"quiz_q_{index}_{item.get('id', index)}",
         )
     if question_type == "short_answer":
         return st.text_area(
-            f"Q{index + 1}. {item['question']}",
+            f"{question_prefix}{index + 1}. {item['question']}",
             key=f"quiz_q_{index}_{item.get('id', index)}",
             height=100,
         )
     if question_type == "matching":
-        st.markdown(f"**Q{index + 1}. {item['question']}**")
+        st.markdown(f"**{question_prefix}{index + 1}. {item['question']}**")
         selected_pairs = {}
         options = item.get("options", [])
         for pair_index, pair in enumerate(item.get("pairs", [])):
@@ -286,19 +300,19 @@ def _render_question_input(index: int, item: dict[str, Any]) -> Any:
     return None
 
 
-def _render_flashcards(flashcards: list[dict[str, str]]) -> None:
+def _render_flashcards(flashcards: list[dict[str, str]], language: str) -> None:
     if not flashcards:
         return
 
-    with st.expander("Flashcards from this quiz", expanded=False):
+    with st.expander(t("quiz.flashcards", language), expanded=False):
         for card in flashcards:
             st.markdown(f"**{card['front']}**")
             st.write(card["back"])
 
 
-def _render_attempt_history(attempts: list[dict[str, Any]]) -> None:
+def _render_attempt_history(attempts: list[dict[str, Any]], language: str) -> None:
     if attempts:
-        st.markdown("### Attempt history")
+        st.markdown(f"### {t('quiz.history', language)}")
         history_df = pd.DataFrame(attempts)
         st.dataframe(history_df, use_container_width=True, hide_index=True)
 
@@ -315,6 +329,3 @@ def _default_topic(active_plan: dict[str, Any] | None) -> str:
         return active_plan["weak_topics"][0]
     return "Backpropagation"
 
-
-def _detect_language(text: str) -> str:
-    return "ar" if any("\u0600" <= char <= "\u06FF" for char in text) else "en"

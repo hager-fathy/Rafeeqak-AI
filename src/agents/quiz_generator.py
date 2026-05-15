@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from typing import Any
 
+from src.localization import normalize_language, t
 from src.tools.llm_client import LLMClient
 
 
@@ -70,7 +71,7 @@ class QuizGeneratorAgent:
             "correct": "فهم الفكرة الأساسية ثم ربطها بمثال محلول.",
             "distractors": [
                 "حفظ عنوان الموضوع فقط.",
-                "تجاوز الأمثلة والانتقال لأسئلة غير مرتبطة.",
+                "تجاوز الأمثلة والانتقال إلى أسئلة غير مرتبطة.",
                 "التركيز فقط على شكل الملاحظات.",
             ],
             "explanation": "التعريف الواضح مع مثال يختبر الحفظ والفهم معا.",
@@ -79,7 +80,7 @@ class QuizGeneratorAgent:
             "question": "ما النشاط الذي يثبت أنك فهمت {topic}؟",
             "correct": "حل مسألة جديدة وشرح كل خطوة بكلماتك.",
             "distractors": [
-                "إعادة قراءة نفس الفقرة بدون اختبار نفسك.",
+                "إعادة قراءة نفس الفقرة دون اختبار نفسك.",
                 "تظليل التعريفات فقط.",
                 "تجنب التدريب حتى لا تخطئ.",
             ],
@@ -111,13 +112,15 @@ class QuizGeneratorAgent:
         question_types: list[str] | None = None,
         previous_questions: list[str] | None = None,
     ) -> dict[str, Any]:
+        language = normalize_language(language)
         clean_topic = self._clean_topic(topic)
         question_count = max(int(count or 1), 1)
         context_chunks = context_chunks or []
         selected_types = self._normalize_question_types(question_types)
         previous_normalized = {self._normalize_text(item) for item in previous_questions or []}
         rng = random.Random(
-            f"{clean_topic.lower()}::{question_count}::{language}::{difficulty.lower()}::{','.join(selected_types)}::{len(previous_normalized)}"
+            f"{clean_topic.lower()}::{question_count}::{language}::{difficulty.lower()}::"
+            f"{','.join(selected_types)}::{len(previous_normalized)}"
         )
 
         llm_quiz = self._generate_with_llm(
@@ -143,7 +146,6 @@ class QuizGeneratorAgent:
                 context_chunks=context_chunks,
                 rng=rng,
             )
-
             flashcards = self._flashcards(clean_topic, context_chunks=context_chunks, language=language)
             generation_mode = "offline_template"
 
@@ -162,7 +164,7 @@ class QuizGeneratorAgent:
         return {
             "ok": True,
             "status": "generated",
-            "message": "Quiz generated.",
+            "message": t("quiz.generated", language, source_note=""),
             "topic": clean_topic,
             "count": len(questions),
             "quiz": quiz,
@@ -312,9 +314,9 @@ class QuizGeneratorAgent:
         use_correct = rng.choice([True, False])
         statement = template["correct"] if use_correct else template["distractors"][0]
         question_text = (
-            f"True or false ({difficulty}): {statement}"
-            if language != "ar"
-            else f"صح أم خطأ ({difficulty}): {statement}"
+            f"صح أم خطأ ({difficulty}): {statement}"
+            if language == "ar"
+            else f"True or false ({difficulty}): {statement}"
         )
         return {
             "id": f"true-false-{question_number}",
@@ -322,7 +324,7 @@ class QuizGeneratorAgent:
             "topic": topic,
             "difficulty": difficulty,
             "question": question_text,
-            "options": ["True", "False"] if language != "ar" else ["صح", "خطأ"],
+            "options": ["صح", "خطأ"] if language == "ar" else ["True", "False"],
             "answer_index": 0 if use_correct else 1,
             "explanation": template["explanation"],
             "source": "generated",
@@ -340,9 +342,9 @@ class QuizGeneratorAgent:
         expected = self._trim(context_chunk.get("text", ""), max_length=180) if context_chunk else template["correct"]
         keywords = self._keywords(expected, topic)
         prompt = (
-            f"Short answer ({difficulty}): Explain {topic} in one or two sentences."
-            if language != "ar"
-            else f"إجابة قصيرة ({difficulty}): اشرح {topic} في جملة أو جملتين."
+            f"إجابة قصيرة ({difficulty}): اشرح {topic} في جملة أو جملتين."
+            if language == "ar"
+            else f"Short answer ({difficulty}): Explain {topic} in one or two sentences."
         )
         return {
             "id": f"short-answer-{question_number}",
@@ -368,16 +370,20 @@ class QuizGeneratorAgent:
         language: str,
         difficulty: str,
     ) -> dict[str, Any]:
-        pairs = [
-            {"left": f"{topic} core idea", "right": template["correct"]},
-            {"left": f"{topic} common trap", "right": template["distractors"][0]},
-            {"left": f"{topic} practice move", "right": "Use a worked example, then solve a new question."},
-        ]
-        question = (
-            f"Matching ({difficulty}): Match each {topic} prompt to the best description."
-            if language != "ar"
-            else f"مطابقة ({difficulty}): طابق كل عبارة عن {topic} مع الوصف الأنسب."
-        )
+        if language == "ar":
+            pairs = [
+                {"left": f"الفكرة الأساسية في {topic}", "right": template["correct"]},
+                {"left": f"خطأ شائع في {topic}", "right": template["distractors"][0]},
+                {"left": f"حركة تدريب في {topic}", "right": "استخدم مثالا محلولا ثم حل سؤالا جديدا."},
+            ]
+            question = f"مطابقة ({difficulty}): طابق كل عبارة عن {topic} مع الوصف الأنسب."
+        else:
+            pairs = [
+                {"left": f"{topic} core idea", "right": template["correct"]},
+                {"left": f"{topic} common trap", "right": template["distractors"][0]},
+                {"left": f"{topic} practice move", "right": "Use a worked example, then solve a new question."},
+            ]
+            question = f"Matching ({difficulty}): Match each {topic} prompt to the best description."
         return {
             "id": f"matching-{question_number}",
             "type": "matching",
@@ -538,7 +544,7 @@ class QuizGeneratorAgent:
         if context_chunks:
             best_chunk = self._trim(context_chunks[0].get("text", ""), max_length=220)
             if best_chunk:
-                prompt = "What do my notes say?" if language != "ar" else "ماذا تقول ملاحظاتي؟"
+                prompt = "ماذا تقول ملاحظاتي؟" if language == "ar" else "What do my notes say?"
                 cards.insert(0, {"front": f"{prompt} {topic}", "back": best_chunk})
         return cards
 

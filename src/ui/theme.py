@@ -4,12 +4,15 @@ from html import escape
 
 import streamlit as st
 
+from src.localization import is_rtl, normalize_language, t
 
-def inject_global_styles() -> None:
-    st.markdown(
-        """
+
+def inject_global_styles(language: str = "en") -> None:
+    language = normalize_language(language)
+    direction_css = _direction_styles(language)
+    styles = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
   --bg-base: #070b10;
@@ -26,7 +29,7 @@ def inject_global_styles() -> None:
 }
 
 html, body, [class*="css"] {
-  font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+  font-family: "Plus Jakarta Sans", "Noto Sans Arabic", "Segoe UI", sans-serif;
   color: var(--text-strong);
 }
 
@@ -57,7 +60,7 @@ section.main > div {
 }
 
 h1, h2, h3 {
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 [data-testid="stMetric"] {
@@ -280,12 +283,14 @@ h1, h2, h3 {
 .top-nav-title {
   text-align: center;
   font-size: 0.86rem;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: #8ea7c1;
   margin: 0.1rem 0 0.38rem 0;
   font-weight: 700;
 }
+
+{direction_css}
 
 @keyframes fadeUp {
   from {
@@ -312,9 +317,8 @@ h1, h2, h3 {
   }
 }
 </style>
-        """,
-        unsafe_allow_html=True,
-    )
+        """
+    st.markdown(styles.replace("{direction_css}", direction_css), unsafe_allow_html=True)
 
 
 def render_page_hero(
@@ -323,17 +327,20 @@ def render_page_hero(
     *,
     chips: list[str] | None = None,
     accent_chip: str | None = None,
+    language: str = "en",
 ) -> None:
+    language = normalize_language(language)
     chip_html = ""
     if chips:
         chip_html += "".join([f"<span class='chip'>{escape(item)}</span>" for item in chips])
     if accent_chip:
         chip_html += f"<span class='chip chip-accent'>{escape(accent_chip)}</span>"
+    direction = "rtl" if is_rtl(language) else "ltr"
 
     st.markdown(
         f"""
-<section class="hero-shell">
-  <span class="hero-kicker">Smart Study Planner</span>
+<section class="hero-shell" dir="{direction}">
+  <span class="hero-kicker">{escape(t("hero.kicker", language))}</span>
   <h2 class="hero-title">{escape(title)}</h2>
   <p class="hero-subtitle">{escape(subtitle)}</p>
   <div class="chip-row">{chip_html}</div>
@@ -341,3 +348,48 @@ def render_page_hero(
         """,
         unsafe_allow_html=True,
     )
+
+
+def _direction_styles(language: str) -> str:
+    if not is_rtl(language):
+        return """
+[data-testid="stAppViewContainer"] {
+  direction: ltr;
+}
+"""
+
+    return """
+[data-testid="stAppViewContainer"],
+section.main,
+[data-testid="stMarkdownContainer"],
+[data-testid="stForm"],
+[data-testid="stChatInput"],
+[data-testid="stChatMessage"] {
+  direction: rtl;
+  text-align: right;
+}
+
+.stTextInput input,
+.stNumberInput input,
+.stTextArea textarea,
+[data-testid="stDateInput"] input {
+  direction: rtl;
+  text-align: right;
+}
+
+[data-testid="stSegmentedControl"] [role="radiogroup"],
+[data-baseweb="select"] {
+  direction: rtl;
+}
+
+.chip-row {
+  justify-content: flex-start;
+}
+
+[data-testid="stDataFrame"],
+[data-testid="stTable"],
+[data-testid="stMetric"] {
+  direction: rtl;
+  text-align: right;
+}
+"""

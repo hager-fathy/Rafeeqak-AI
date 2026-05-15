@@ -4,6 +4,8 @@ import re
 from datetime import datetime
 from typing import Any
 
+from src.localization import normalize_language, t
+
 
 class ProgressEvaluatorAgent:
     """Scores quiz attempts and converts mistakes into progress signals."""
@@ -17,11 +19,12 @@ class ProgressEvaluatorAgent:
         topic: str,
         language: str = "en",
     ) -> dict[str, Any]:
+        language = normalize_language(language)
         if not questions:
             return {
                 "ok": False,
                 "status": "empty_quiz",
-                "message": "No quiz questions were provided.",
+                "message": t("evaluator.empty", language),
                 "correct": 0,
                 "total": 0,
                 "points_earned": 0.0,
@@ -98,22 +101,14 @@ class ProgressEvaluatorAgent:
         ]
 
     def _summary(self, correct: int, total: int, score_percent: float, language: str) -> str:
-        if language == "ar":
-            return f"درجتك: {correct}/{total} ({score_percent}%)."
-        return f"Score: {correct}/{total} ({score_percent}%)."
+        return t("evaluator.summary", language, correct=correct, total=total, score_percent=score_percent)
 
     def _recommendation(self, score_percent: float, topic: str, language: str) -> str:
         if score_percent >= 85:
-            if language == "ar":
-                return "ممتاز. انتقل إلى تدريب مختلط وارفع الصعوبة في المرة القادمة."
-            return f"Great mastery of {topic}. Move to mixed practice and raise the difficulty next time."
+            return t("evaluator.excellent", language, topic=topic)
         if score_percent >= 70:
-            if language == "ar":
-                return "تقدم جيد. راجع شرح الأخطاء والأسئلة ذات الدرجة الجزئية مرة واحدة."
-            return "Good progress. Review missed and partial-credit explanations, then retry the weakest question type."
-        if language == "ar":
-            return f"راجع {topic} مرة أخرى، ثم أعد اختبارا قصيرا يركز على أنواع الأسئلة التي أخطأت فيها."
-        return f"Review {topic} again, then retry a short quiz focused on the question types you missed."
+            return t("evaluator.good", language)
+        return t("evaluator.review", language, topic=topic)
 
     def _score_question(self, question: dict[str, Any], answer: Any) -> dict[str, Any]:
         question_type = question.get("type", "mcq")

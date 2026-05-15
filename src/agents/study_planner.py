@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from src.localization import normalize_language, t
 from src.tools.llm_client import LLMClient
 
 
@@ -22,6 +23,7 @@ class StudyPlannerAgent:
         self.llm_client = llm_client or LLMClient()
 
     def generate(self, profile: dict[str, Any]) -> dict[str, Any]:
+        language = normalize_language(profile.get("language"))
         course_name = str(profile.get("course_name") or "General Revision").strip()
         exam_date = self._coerce_date(profile.get("exam_date"))
         daily_hours = self._coerce_hours(profile.get("daily_hours"))
@@ -88,9 +90,12 @@ class StudyPlannerAgent:
             "plan": plan,
             "exam_date": exam_date,
             "generation_mode": generation_mode,
-            "summary": (
-                f"Created {len(tasks)} study task(s) for {course_name}. "
-                f"Weak topics are prioritized first: {', '.join(weak_topics) if weak_topics else 'none'}."
+            "summary": t(
+                "planner.summary",
+                language,
+                count=len(tasks),
+                course_name=course_name,
+                weak_topics=", ".join(weak_topics) if weak_topics else t("planner.none", language),
             ),
         }
 

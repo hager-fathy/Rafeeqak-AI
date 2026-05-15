@@ -4,6 +4,7 @@ from datetime import date
 from typing import Any
 
 from src.memory import MemoryRepositoryError, SupabaseMemoryRepository
+from src.localization import normalize_language
 
 
 class MemoryAgent:
@@ -134,6 +135,50 @@ class MemoryAgent:
             profile = self._ensure_student_profile(email=student_email, full_name=student_name)
             snapshot = self.repository.fetch_student_snapshot(student_id=profile["id"])
             return {"ok": True, "snapshot": snapshot}
+        except MemoryRepositoryError as exc:
+            return {"ok": False, "reason": str(exc)}
+
+    def get_preferred_language(
+        self,
+        *,
+        student_email: str | None = None,
+        student_name: str | None = None,
+    ) -> dict[str, Any]:
+        if not self.repository.is_available:
+            return {"ok": False, "reason": self.repository.unavailability_reason}
+
+        try:
+            profile = self._ensure_student_profile(email=student_email, full_name=student_name)
+            return {
+                "ok": True,
+                "preferred_language": normalize_language(profile.get("preferred_language")),
+                "student_id": profile["id"],
+            }
+        except MemoryRepositoryError as exc:
+            return {"ok": False, "reason": str(exc)}
+
+    def save_preferred_language(
+        self,
+        *,
+        preferred_language: str,
+        student_email: str | None = None,
+        student_name: str | None = None,
+    ) -> dict[str, Any]:
+        if not self.repository.is_available:
+            return {"ok": False, "reason": self.repository.unavailability_reason}
+
+        try:
+            profile = self.repository.update_preferred_language(
+                email=student_email,
+                full_name=student_name,
+                preferred_language=normalize_language(preferred_language),
+            )
+            self._student_id = profile["id"]
+            return {
+                "ok": True,
+                "preferred_language": normalize_language(profile.get("preferred_language")),
+                "student_id": profile["id"],
+            }
         except MemoryRepositoryError as exc:
             return {"ok": False, "reason": str(exc)}
 

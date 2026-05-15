@@ -32,7 +32,7 @@ class SupabaseMemoryRepository:
         *,
         email: str | None = None,
         full_name: str | None = None,
-        preferred_language: str = "en",
+        preferred_language: str | None = None,
     ) -> dict[str, Any]:
         self._ensure_available()
 
@@ -42,8 +42,9 @@ class SupabaseMemoryRepository:
         payload = {
             "email": student_email,
             "full_name": student_name,
-            "preferred_language": preferred_language,
         }
+        if preferred_language:
+            payload["preferred_language"] = preferred_language
 
         try:
             self.client.table("student_profiles").upsert(payload, on_conflict="email").execute()
@@ -59,6 +60,26 @@ class SupabaseMemoryRepository:
             return response.data
         except Exception as exc:  # pragma: no cover - depends on external DB
             raise MemoryRepositoryError(f"Failed to create/load student profile: {exc}") from exc
+
+    def update_preferred_language(
+        self,
+        *,
+        email: str | None = None,
+        full_name: str | None = None,
+        preferred_language: str,
+    ) -> dict[str, Any]:
+        self._ensure_available()
+
+        try:
+            return self.create_or_get_student_profile(
+                email=email,
+                full_name=full_name,
+                preferred_language=preferred_language,
+            )
+        except MemoryRepositoryError:
+            raise
+        except Exception as exc:  # pragma: no cover - depends on external DB
+            raise MemoryRepositoryError(f"Failed to update preferred language: {exc}") from exc
 
     def upsert_course(
         self,

@@ -232,7 +232,7 @@ Course Name - File Name - Page/Chunk.
 ## 9. Enhanced Implementation Plan
 
 **Current status checked:** 2026-05-15
-**Latest verification:** `.venv\Scripts\python.exe -m pytest` passes: 38 passed, 2 warnings.
+**Latest verification:** `.venv\Scripts\python.exe -m pytest` passes: 42 passed, 2 warnings.
 
 Legend:
 
@@ -311,13 +311,13 @@ Legend:
 
 ### Phase 9 - Localization And UI Polish
 
-- [~] Detect Arabic input in router.
-- [ ] Add language toggle: English / Arabic.
-- [ ] Save selected language in session state and user profile.
-- [ ] Translate UI labels, alerts, buttons, errors, empty states, and assistant responses.
-- [ ] Add RTL layout when Arabic is selected.
-- [ ] Add localization helper files or dictionaries.
-- [ ] Improve visual polish across all pages.
+- [x] Detect Arabic input in router.
+- [x] Add language toggle: English / Arabic.
+- [x] Save selected language in session state and user profile.
+- [x] Translate UI labels, alerts, buttons, errors, empty states, and assistant responses.
+- [x] Add RTL layout when Arabic is selected.
+- [x] Add localization helper files or dictionaries.
+- [x] Improve visual polish across all pages.
 
 ### Phase 10 - Prompt Templates And LLM Quality
 
@@ -383,7 +383,7 @@ Legend:
 | Global course selector | Complete |
 | Course-scoped chat history | Complete |
 | Course-scoped RAG retrieval | Complete |
-| Full Arabic localization and RTL | Pending |
+| Full Arabic localization and RTL | Complete |
 | Reusable prompt templates | Pending |
 | Multiple quiz question types | Complete |
 | Partial scoring for text answers | Complete |
