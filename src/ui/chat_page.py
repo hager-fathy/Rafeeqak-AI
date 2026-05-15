@@ -2,7 +2,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.tools.state import append_route_trace, get_memory_agent, get_supervisor_agent, touch_activity
+from src.tools.state import append_route_trace, get_authenticated_user, get_memory_agent, get_supervisor_agent, touch_activity
 from src.ui.theme import render_page_hero
 
 
@@ -14,6 +14,7 @@ def _assistant_reply(user_message: str) -> str:
             "study_plans": st.session_state.get("study_plans", []),
             "quiz_attempts": st.session_state.get("quiz_attempts", []),
             "uploads": st.session_state.get("uploads", []),
+            "auth_user": get_authenticated_user(),
         },
         memory_agent=get_memory_agent(),
     )

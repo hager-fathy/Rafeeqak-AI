@@ -1,6 +1,7 @@
 from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
 from src.agents.supervisor import SupervisorAgent
+from src.tools.semantic_cache import SemanticResponseCache
 
 
 def test_quiz_generator_creates_topic_questions_and_flashcards() -> None:
@@ -62,8 +63,9 @@ def test_progress_evaluator_uses_arabic_feedback_text() -> None:
     assert "درجتك" in result["summary"]
 
 
-def test_supervisor_quiz_route_generates_quiz_payload() -> None:
-    result = SupervisorAgent().handle_message("Quiz me on gradient descent")
+def test_supervisor_quiz_route_generates_quiz_payload(tmp_path) -> None:
+    supervisor = SupervisorAgent(semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"))
+    result = supervisor.handle_message("Quiz me on gradient descent")
 
     assert result["agent"] == "quiz_generator_agent"
     assert result["payload"]["ok"] is True

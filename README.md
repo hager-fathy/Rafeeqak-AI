@@ -1,6 +1,6 @@
 # Smart Study Planner
 
-This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (multi-agent routing), phase 5 (course-material RAG), and phase 6 (quiz generation and evaluation) of the Smart Study Planner Chatbot project:
+This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (multi-agent routing), phase 5 (course-material RAG), phase 6 (quiz generation and evaluation), and phase 7 (CAG and structured database query) of the Smart Study Planner Chatbot project:
 
 - Phase 1: project setup and base structure
 - Phase 2: Streamlit UI pages (chat, study plan, upload, quiz, dashboard)
@@ -8,6 +8,7 @@ This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (m
 - Phase 4: input routing, supervisor orchestration, study planner agent, memory handoff, and route trace logging
 - Phase 5: local text extraction, chunking, vector-store persistence, and grounded Course RAG answers
 - Phase 6: topic/RAG-grounded quiz generation, flashcards, scoring feedback, and weak-topic detection
+- Phase 7: semantic response cache plus structured progress, deadline, score, and weak-topic queries
 
 ## Quick Start
 
@@ -99,9 +100,13 @@ smart-study-planner/
   - Quiz Generator Agent creates MCQs and flashcards from a topic plus retrieved course chunks when available
   - Progress Evaluator Agent scores submitted answers and returns per-question feedback
   - Low quiz scores are saved as weak-topic signals through the Memory Agent when Supabase is configured
+- Phase 7 CAG/database query flow:
+  - repeated chat questions are reused from `data/cache/semantic_cache.json` when the session context is unchanged
+  - progress, deadline, score, and weak-topic questions route to the Database Query Agent
+  - structured answers use the active local session first and Supabase memory snapshots when available
 
 ## Next Phases
 
 Upcoming phases can build on this scaffold by adding:
 
-- Semantic cache and structured database query tools
+- Multimodal notes, stronger safety filtering, and demo polish

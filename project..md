@@ -187,8 +187,8 @@ Legend:
 - [x] Store quiz scores and update weak topics automatically.
 
 ### Phase 7 — CAG and Database Query
-- [ ] Add semantic cache for repeated questions.
-- [ ] Add structured query handler for progress and deadlines.
+- [x] Add semantic cache for repeated questions.
+- [x] Add structured query handler for progress and deadlines.
 
 ### Phase 8 — Bonus Features
 - [ ] Multimodal input: upload images of notes or screenshots.

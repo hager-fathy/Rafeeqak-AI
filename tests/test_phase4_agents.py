@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from src.agents.input_router import InputRouterAgent
 from src.agents.study_planner import StudyPlannerAgent
 from src.agents.supervisor import SupervisorAgent
+from src.tools.semantic_cache import SemanticResponseCache
 
 
 def test_input_router_detects_study_plan_intent() -> None:
@@ -48,7 +49,7 @@ def test_study_planner_generates_weighted_plan() -> None:
     assert plan["tasks"][2]["checkpoint"] is True
 
 
-def test_supervisor_runs_traceable_study_plan_route() -> None:
+def test_supervisor_runs_traceable_study_plan_route(tmp_path) -> None:
     plan = StudyPlannerAgent().generate(
         {
             "course_name": "Machine Learning",
@@ -59,7 +60,8 @@ def test_supervisor_runs_traceable_study_plan_route() -> None:
         }
     )["plan"]
 
-    result = SupervisorAgent().handle_message(
+    supervisor = SupervisorAgent(semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"))
+    result = supervisor.handle_message(
         "What should I study today?",
         context={"active_plan": plan, "uploads": [], "quiz_attempts": []},
     )
@@ -71,12 +73,13 @@ def test_supervisor_runs_traceable_study_plan_route() -> None:
         "SafetyAgent",
         "InputRouterAgent",
         "SupervisorAgent",
+        "SemanticCache",
         "StudyPlannerAgent",
         "ResponseAgent",
     ]
 
 
-def test_supervisor_replies_in_arabic_for_arabic_study_plan_request() -> None:
+def test_supervisor_replies_in_arabic_for_arabic_study_plan_request(tmp_path) -> None:
     plan = StudyPlannerAgent().generate(
         {
             "course_name": "Machine Learning",
@@ -87,7 +90,8 @@ def test_supervisor_replies_in_arabic_for_arabic_study_plan_request() -> None:
         }
     )["plan"]
 
-    result = SupervisorAgent().handle_message(
+    supervisor = SupervisorAgent(semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"))
+    result = supervisor.handle_message(
         "ماذا أذاكر اليوم؟",
         context={"active_plan": plan, "uploads": [], "quiz_attempts": []},
     )
@@ -98,8 +102,9 @@ def test_supervisor_replies_in_arabic_for_arabic_study_plan_request() -> None:
     assert "Backpropagation" in result["response"]
 
 
-def test_supervisor_replies_in_arabic_for_general_arabic_chat() -> None:
-    result = SupervisorAgent().handle_message("مرحبا")
+def test_supervisor_replies_in_arabic_for_general_arabic_chat(tmp_path) -> None:
+    supervisor = SupervisorAgent(semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"))
+    result = supervisor.handle_message("مرحبا")
 
     assert result["language"] == "ar"
     assert result["agent"] == "response_agent"

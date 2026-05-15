@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from src.retrieval import CourseMaterialIndexer
+from src.tools.semantic_cache import SemanticResponseCache
 from src.tools.state import get_authenticated_user, get_memory_agent
 from src.ui.theme import render_page_hero
 
@@ -17,6 +18,7 @@ def render_dashboard_page(project_root: Path) -> None:
         vector_store_dir=project_root / "data" / "vector_store",
     )
     retrieval_stats = indexer.stats()
+    cache_stats = SemanticResponseCache().stats()
     memory_status = get_memory_agent().status()
     auth_user = get_authenticated_user()
     student_email = auth_user.get("email") if auth_user else None
@@ -33,17 +35,19 @@ def render_dashboard_page(project_root: Path) -> None:
             f"Plans: {len(study_plans)}",
             f"Uploads: {len(uploads)}",
             f"RAG chunks: {retrieval_stats['chunks']}",
+            f"Cache entries: {cache_stats['entries']}",
             f"Quiz avg: {average_quiz}%",
         ],
         accent_chip="Insights",
     )
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Plans Created", len(study_plans), border=True)
     col2.metric("Quiz Attempts", len(quiz_attempts), border=True)
     col3.metric("Average Quiz Score", f"{average_quiz}%", border=True)
     col4.metric("Uploaded Files", len(uploads), border=True)
     col5.metric("RAG Chunks", retrieval_stats["chunks"], border=True)
+    col6.metric("Cache Entries", cache_stats["entries"], border=True)
 
     st.caption("Supabase memory: connected" if memory_status["enabled"] else f"Supabase memory: {memory_status['reason']}")
 

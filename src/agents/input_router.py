@@ -7,14 +7,26 @@ class InputRouterAgent:
     ENGLISH_KEYWORDS = {
         "quiz": ["quiz", "test me", "question", "questions", "practice", "flashcard"],
         "course_material": ["upload", "pdf", "slide", "notes", "lecture", "material", "explain"],
-        "memory": ["remember", "memory", "progress", "score", "scores", "weakness"],
+        "database_query": [
+            "deadline",
+            "deadlines",
+            "progress",
+            "completed",
+            "remaining",
+            "score",
+            "scores",
+            "average",
+            "weakness",
+        ],
+        "memory": ["remember", "memory", "stored", "saved"],
         "study_plan": ["plan", "schedule", "study", "revise", "revision", "today", "tomorrow", "exam", "weak"],
     }
 
     ARABIC_KEYWORDS = {
         "quiz": ["اختبار", "اسئلة", "أسئلة", "كويز", "تدريب", "فلاش كارد"],
         "course_material": ["ملف", "محاضرة", "ملاحظات", "شرح", "المادة", "ملخص", "pdf"],
-        "memory": ["تذكر", "ذاكرة", "تقدمي", "درجات", "نقاط ضعفي", "ضعفي"],
+        "database_query": ["موعد", "مواعيد", "تقدم", "أنجزت", "المتبقي", "درجات", "درجة", "متوسط", "ضعفي"],
+        "memory": ["تذكر", "ذاكرة", "محفوظ", "حفظت"],
         "study_plan": ["خطة", "جدول", "اذاكر", "أذاكر", "مراجعة", "امتحان", "اليوم", "بكرة"],
     }
 

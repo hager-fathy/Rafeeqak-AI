@@ -1,6 +1,7 @@
 from src.agents.course_rag import CourseRAGAgent
 from src.agents.supervisor import SupervisorAgent
 from src.retrieval import CourseMaterialIndexer
+from src.tools.semantic_cache import SemanticResponseCache
 
 
 def test_course_material_indexer_extracts_chunks_and_searches(tmp_path) -> None:
@@ -70,7 +71,10 @@ def test_supervisor_routes_course_material_questions_to_rag(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    supervisor = SupervisorAgent(course_rag=CourseRAGAgent(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir))
+    supervisor = SupervisorAgent(
+        course_rag=CourseRAGAgent(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir),
+        semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"),
+    )
     result = supervisor.handle_message("Explain gradient descent from the lecture notes")
 
     assert result["agent"] == "course_rag_agent"
