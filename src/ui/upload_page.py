@@ -5,17 +5,27 @@ import pandas as pd
 import streamlit as st
 
 from src.retrieval import CourseMaterialIndexer
-from src.tools.state import touch_activity
+from src.tools.state import (
+    course_context,
+    get_active_course,
+    require_active_course_message,
+    touch_activity,
+    update_active_course_bucket,
+)
 from src.ui.theme import render_page_hero
 
 
 def render_upload_page(project_root: Path) -> None:
-    uploads_dir = project_root / "data" / "uploads"
+    root_uploads_dir = project_root / "data" / "uploads"
     vector_store_dir = project_root / "data" / "vector_store"
+    active_course = get_active_course()
+    course_id = active_course["id"] if active_course else None
+    course_name = active_course["name"] if active_course else None
+    uploads_dir = root_uploads_dir / course_id if course_id else root_uploads_dir
     uploads_dir.mkdir(parents=True, exist_ok=True)
     vector_store_dir.mkdir(parents=True, exist_ok=True)
-    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
-    index_stats = indexer.stats()
+    indexer = CourseMaterialIndexer(uploads_dir=root_uploads_dir, vector_store_dir=vector_store_dir)
+    index_stats = indexer.stats(course_id=course_id)
 
     stored_files = _stored_material_files(uploads_dir)
     total_size_mb = round(sum(file.stat().st_size for file in stored_files) / (1024 * 1024), 2) if stored_files else 0.0
@@ -24,12 +34,17 @@ def render_upload_page(project_root: Path) -> None:
         "Course Material Hub",
         "Centralize lecture notes and source files to prepare for retrieval and grounded answers.",
         chips=[
+            f"Course: {course_name or 'None selected'}",
             f"Files stored: {len(stored_files)}",
             f"Indexed chunks: {index_stats['chunks']}",
             f"Disk usage: {total_size_mb} MB",
         ],
         accent_chip="Upload center",
     )
+
+    course_warning = require_active_course_message()
+    if course_warning:
+        st.info(course_warning)
 
     upload_col, library_col = st.columns([1.4, 1], gap="large")
 
@@ -40,9 +55,10 @@ def render_upload_page(project_root: Path) -> None:
                 "Upload PDFs, slides, or notes",
                 type=["pdf", "txt", "md", "docx", "pptx"],
                 accept_multiple_files=True,
+                disabled=active_course is None,
             )
 
-            if st.button("Save uploaded files", type="primary", width="stretch"):
+            if st.button("Save uploaded files", type="primary", width="stretch", disabled=active_course is None):
                 if not files:
                     st.warning("Select at least one file first.")
                 else:
@@ -52,14 +68,18 @@ def render_upload_page(project_root: Path) -> None:
                         safe_name = f"{timestamp}_{file.name}"
                         destination = uploads_dir / safe_name
                         destination.write_bytes(file.getbuffer())
-                        index_results.append(indexer.index_file(destination))
-                        st.session_state.uploads.append(
+                        index_results.append(indexer.index_file(destination, course_id=course_id, course_name=course_name))
+                        uploads = course_context()["uploads"]
+                        uploads.append(
                             {
+                                "course_id": course_id,
+                                "course_name": course_name,
                                 "original_name": file.name,
                                 "stored_name": safe_name,
                                 "saved_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
                             }
                         )
+                        update_active_course_bucket(uploads=uploads)
                     touch_activity()
                     indexed_count = sum(1 for result in index_results if result["ok"])
                     chunk_count = sum(result.get("chunks", 0) for result in index_results if result["ok"])
@@ -117,13 +137,14 @@ def render_upload_page(project_root: Path) -> None:
             st.caption(f"{round(stat.st_size / 1024, 2)} KB")
         with action_col:
             if st.button("Delete", key=f"delete_upload_{file_path.name}", width="stretch"):
-                result = indexer.remove_file(file_path)
+                result = indexer.remove_file(file_path, course_id=course_id)
                 if result["ok"]:
-                    st.session_state.uploads = [
+                    uploads = [
                         item
-                        for item in st.session_state.get("uploads", [])
+                        for item in course_context().get("uploads", [])
                         if item.get("stored_name") != file_path.name
                     ]
+                    update_active_course_bucket(uploads=uploads)
                     touch_activity()
                     st.success(
                         f"Deleted {file_path.name} and removed {result['removed_chunks']} indexed chunk(s)."

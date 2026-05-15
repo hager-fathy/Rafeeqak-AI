@@ -4,7 +4,6 @@ from src.tools.llm_client import get_llm_settings
 def test_llm_settings_prefers_gemini_key(monkeypatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test-model")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
 
     settings = get_llm_settings()
 
@@ -14,13 +13,12 @@ def test_llm_settings_prefers_gemini_key(monkeypatch) -> None:
     assert settings.is_configured is True
 
 
-def test_llm_settings_falls_back_to_openai_when_gemini_is_placeholder(monkeypatch) -> None:
+def test_llm_settings_is_unconfigured_when_gemini_is_placeholder(monkeypatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "your_gemini_api_key_here")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
-    monkeypatch.setenv("OPENAI_MODEL", "openai-test-model")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test-model")
 
     settings = get_llm_settings()
 
-    assert settings.provider == "openai"
-    assert settings.api_key == "openai-test-key"
-    assert settings.model == "openai-test-model"
+    assert settings.provider == "gemini"
+    assert settings.model == "gemini-test-model"
+    assert settings.is_configured is False

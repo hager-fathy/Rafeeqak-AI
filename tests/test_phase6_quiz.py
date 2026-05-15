@@ -60,6 +60,32 @@ def test_quiz_generator_honors_large_question_count() -> None:
     assert len(result["questions"]) == 12
 
 
+def test_quiz_generator_supports_difficulty_types_and_repeat_avoidance() -> None:
+    first = QuizGeneratorAgent().generate(
+        topic="Backpropagation",
+        count=4,
+        difficulty="hard",
+        question_types=["mcq", "true_false", "short_answer", "matching"],
+    )
+    previous = [question["question"] for question in first["questions"]]
+    second = QuizGeneratorAgent().generate(
+        topic="Backpropagation",
+        count=4,
+        difficulty="hard",
+        question_types=["mcq", "true_false", "short_answer", "matching"],
+        previous_questions=previous,
+    )
+
+    assert first["quiz"]["difficulty"] == "hard"
+    assert {question["type"] for question in first["questions"]} == {
+        "mcq",
+        "true_false",
+        "short_answer",
+        "matching",
+    }
+    assert not set(previous) & {question["question"] for question in second["questions"]}
+
+
 def test_quiz_generator_uses_llm_when_available() -> None:
     result = QuizGeneratorAgent(llm_client=FakeQuizLLM()).generate(topic="Backpropagation", count=2)
 
@@ -89,6 +115,28 @@ def test_progress_evaluator_scores_answers_and_flags_weak_topic() -> None:
     assert result["score_percent"] == 50.0
     assert result["weak_topics"][0]["topic"] == "SVM"
     assert result["feedback"][1]["is_correct"] is False
+
+
+def test_progress_evaluator_partial_scores_text_and_matching_answers() -> None:
+    quiz = QuizGeneratorAgent().generate(
+        topic="Backpropagation",
+        count=2,
+        question_types=["short_answer", "matching"],
+    )["quiz"]
+    short_answer, matching = quiz["questions"]
+    partial_matching = dict(matching["answer_map"])
+    first_key = next(iter(partial_matching))
+    partial_matching[first_key] = "wrong"
+
+    result = ProgressEvaluatorAgent().evaluate(
+        questions=quiz["questions"],
+        answers=["Backpropagation uses gradients", partial_matching],
+        topic=quiz["topic"],
+    )
+
+    assert result["ok"] is True
+    assert 0 < result["points_earned"] < result["total_points"]
+    assert any(item["partial_credit"] for item in result["feedback"])
 
 
 def test_progress_evaluator_uses_arabic_feedback_text() -> None:

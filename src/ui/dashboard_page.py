@@ -5,19 +5,21 @@ import streamlit as st
 
 from src.retrieval import CourseMaterialIndexer
 from src.tools.semantic_cache import SemanticResponseCache
-from src.tools.state import get_authenticated_user, get_memory_agent
+from src.tools.state import course_context, get_active_course, get_authenticated_user, get_memory_agent
 from src.ui.theme import render_page_hero
 
 
 def render_dashboard_page(project_root: Path) -> None:
-    study_plans = st.session_state.get("study_plans", [])
-    quiz_attempts = st.session_state.get("quiz_attempts", [])
-    uploads = st.session_state.get("uploads", [])
+    active_course = get_active_course()
+    current_context = course_context()
+    study_plans = current_context.get("study_plans", [])
+    quiz_attempts = current_context.get("quiz_attempts", [])
+    uploads = current_context.get("uploads", [])
     indexer = CourseMaterialIndexer(
         uploads_dir=project_root / "data" / "uploads",
         vector_store_dir=project_root / "data" / "vector_store",
     )
-    retrieval_stats = indexer.stats()
+    retrieval_stats = indexer.stats(course_id=active_course["id"] if active_course else None)
     cache_stats = SemanticResponseCache().stats()
     memory_status = get_memory_agent().status()
     auth_user = get_authenticated_user()
@@ -32,6 +34,7 @@ def render_dashboard_page(project_root: Path) -> None:
         "Learning Operations Dashboard",
         "Monitor study execution, quiz quality, and material readiness from one analytics view.",
         chips=[
+            f"Course: {active_course['name'] if active_course else 'None selected'}",
             f"Plans: {len(study_plans)}",
             f"Uploads: {len(uploads)}",
             f"RAG chunks: {retrieval_stats['chunks']}",
@@ -60,7 +63,7 @@ def render_dashboard_page(project_root: Path) -> None:
         st.info("No quiz attempts yet.")
 
     st.markdown("### Active Plan Overview")
-    active_plan = st.session_state.get("active_plan")
+    active_plan = current_context.get("active_plan")
     if active_plan:
         plan_df = pd.DataFrame(active_plan["tasks"])
         topic_hours = plan_df.groupby("topic", as_index=False)["hours"].sum()

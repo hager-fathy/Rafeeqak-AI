@@ -25,8 +25,15 @@ class CourseRAGAgent:
         self.top_k = top_k
         self.llm_client = llm_client or LLMClient()
 
-    def answer(self, question: str, *, language: str = "en") -> dict:
-        index_result = self.indexer.index_all()
+    def answer(
+        self,
+        question: str,
+        *,
+        language: str = "en",
+        course_id: str | None = None,
+        course_name: str | None = None,
+    ) -> dict:
+        index_result = self.indexer.index_all(course_id=course_id, course_name=course_name)
         stats = index_result["stats"]
         if stats["chunks"] == 0:
             return {
@@ -37,9 +44,11 @@ class CourseRAGAgent:
                 "citations": [],
                 "matches": [],
                 "stats": stats,
+                "course_id": course_id,
+                "course_name": course_name,
             }
 
-        matches = self.indexer.search(question, top_k=self.top_k)
+        matches = self.indexer.search(question, top_k=self.top_k, course_id=course_id)
         if not matches:
             return {
                 "ok": False,
@@ -49,9 +58,11 @@ class CourseRAGAgent:
                 "citations": [],
                 "matches": [],
                 "stats": stats,
+                "course_id": course_id,
+                "course_name": course_name,
             }
 
-        response, generation_mode = self._compose_answer(question, matches, language=language)
+        response, generation_mode = self._compose_answer(question, matches, language=language, course_name=course_name)
         return {
             "ok": True,
             "status": "answered",
@@ -69,9 +80,18 @@ class CourseRAGAgent:
             ],
             "stats": stats,
             "generation_mode": generation_mode,
+            "course_id": course_id,
+            "course_name": course_name,
         }
 
-    def _compose_answer(self, question: str, matches: list[RetrievedChunk], *, language: str) -> tuple[str, str]:
+    def _compose_answer(
+        self,
+        question: str,
+        matches: list[RetrievedChunk],
+        *,
+        language: str,
+        course_name: str | None,
+    ) -> tuple[str, str]:
         llm_answer = self._compose_llm_answer(question, matches, language=language)
         if llm_answer:
             return llm_answer, "llm"
@@ -89,7 +109,7 @@ class CourseRAGAgent:
             return "\n".join(answer_lines), "offline_template"
 
         answer_lines = [
-            f"Based on your uploaded materials, here is the relevant answer to: {question}",
+            f"Based on your uploaded materials for {course_name or 'this course'}, here is the relevant answer to: {question}",
             "",
         ]
         for index, point in enumerate(best_points, start=1):

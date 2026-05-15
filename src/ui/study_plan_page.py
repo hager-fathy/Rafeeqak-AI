@@ -5,11 +5,15 @@ import pandas as pd
 import streamlit as st
 
 from src.tools.state import (
+    add_course,
     append_route_trace,
+    course_context,
+    get_active_course,
     get_authenticated_user,
     get_memory_agent,
     get_supervisor_agent,
     touch_activity,
+    update_active_course_bucket,
 )
 from src.ui.theme import render_page_hero
 
@@ -25,12 +29,15 @@ def render_study_plan_page(project_root: Path) -> None:
     auth_user = get_authenticated_user()
     student_email = auth_user.get("email") if auth_user else None
     student_name = (auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None
+    active_course = get_active_course()
+    current_context = course_context()
 
     render_page_hero(
         "Personalized Study Plan",
         "Create an exam-focused schedule with weighted weak-topic coverage and recurring checkpoints.",
         chips=[
-            f"Saved plans: {len(st.session_state.study_plans)}",
+            f"Course: {active_course['name'] if active_course else 'None selected'}",
+            f"Saved plans: {len(current_context['study_plans'])}",
             f"Current day: {date.today().isoformat()}",
         ],
         accent_chip="Planner",
@@ -42,7 +49,11 @@ def render_study_plan_page(project_root: Path) -> None:
         with st.container(border=True):
             st.markdown("#### Plan configuration")
             with st.form("plan_form"):
-                course_name = st.text_input("Course name", placeholder="Example: Machine Learning")
+                course_name = st.text_input(
+                    "Course name",
+                    value=active_course["name"] if active_course else "",
+                    placeholder="Example: Machine Learning",
+                )
                 exam_date = st.date_input("Exam date", value=date.today() + timedelta(days=10), min_value=date.today())
                 daily_hours = st.number_input("Available study hours per day", min_value=0.5, max_value=12.0, value=2.0, step=0.5)
                 weak_topics_input = st.text_input(
@@ -58,7 +69,7 @@ def render_study_plan_page(project_root: Path) -> None:
     with summary_col:
         with st.container(border=True):
             st.markdown("#### Planning insights")
-            active_plan = st.session_state.get("active_plan")
+            active_plan = current_context.get("active_plan")
             if active_plan:
                 total_tasks = len(active_plan["tasks"])
                 weak_count = len(active_plan["weak_topics"])
@@ -70,11 +81,18 @@ def render_study_plan_page(project_root: Path) -> None:
             st.metric("Supabase memory", "Connected" if memory_status["enabled"] else "Not configured", border=True)
 
     if submit_plan:
+        if active_course is None:
+            active_course = add_course(course_name)
+            current_context = course_context()
+        if active_course is None:
+            st.warning("Enter a course name so the plan can be saved to a course.")
+            return
+
         weak_topics = _parse_topics(weak_topics_input)
         other_topics = _parse_topics(other_topics_input)
         plan_result = get_supervisor_agent().create_study_plan(
             {
-                "course_name": course_name,
+                "course_name": active_course["name"],
                 "exam_date": exam_date,
                 "daily_hours": daily_hours,
                 "weak_topics": weak_topics,
@@ -86,8 +104,9 @@ def render_study_plan_page(project_root: Path) -> None:
         )
         append_route_trace(plan_result["trace"])
         plan = plan_result["plan"]
-        st.session_state.study_plans.append(plan)
-        st.session_state.active_plan = plan
+        study_plans = current_context["study_plans"]
+        study_plans.append(plan)
+        update_active_course_bucket(study_plans=study_plans, active_plan=plan)
         touch_activity()
         st.success(plan_result["summary"])
 
@@ -97,7 +116,7 @@ def render_study_plan_page(project_root: Path) -> None:
         else:
             st.warning(f"Study plan saved locally only. Reason: {sync_result['reason']}")
 
-    active_plan = st.session_state.get("active_plan")
+    active_plan = course_context().get("active_plan")
     if not active_plan:
         st.info("No active plan yet. Generate one above.")
         return

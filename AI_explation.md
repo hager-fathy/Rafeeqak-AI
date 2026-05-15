@@ -15,10 +15,9 @@ The wrapper supports:
 | Provider | Environment variable | Default model |
 |---|---|---|
 | Gemini | `GEMINI_API_KEY` | `gemini-2.5-flash` |
-| OpenAI fallback | `OPENAI_API_KEY` | `gpt-4o-mini` |
 | Offline fallback | no key needed | Python templates/rules |
 
-Gemini is preferred. If `GEMINI_API_KEY` is configured, the app uses Gemini. If Gemini is not configured but OpenAI is configured, it can use OpenAI. If neither is configured, the app still works with offline deterministic logic.
+If `GEMINI_API_KEY` is configured, the app uses Gemini. If Gemini is not configured, the app still works with offline deterministic logic.
 
 ## How To Use Gemini
 
@@ -75,9 +74,9 @@ def get_llm_settings() -> LLMSettings:
         )
 
     return LLMSettings(
-        provider="openai",
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        provider="gemini",
+        api_key=gemini_key,
+        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
     )
 ```
 
@@ -215,7 +214,7 @@ Expected JSON shape:
 
 The app is designed to avoid breaking when the LLM is unavailable.
 
-If Gemini/OpenAI fails:
+If Gemini fails:
 
 - Study plan uses Python planner logic.
 - RAG chat uses retrieved text snippets directly.
@@ -253,7 +252,7 @@ Meaning:
 
 | Mode | Meaning |
 |---|---|
-| `llm` | Gemini/OpenAI generated the result. |
+| `llm` | Gemini generated the result. |
 | `offline_template` | The app used local Python logic instead. |
 
 ## Dependencies
@@ -268,12 +267,6 @@ Code:
 
 ```text
 google-genai>=1.0.0
-```
-
-OpenAI is still available as optional fallback:
-
-```text
-openai>=1.60.0
 ```
 
 ## Short Summary

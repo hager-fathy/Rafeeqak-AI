@@ -20,8 +20,13 @@ class RetrievedChunk:
     section: str
     text: str
     score: float
+    chunk_index: int = 1
+    course_id: str | None = None
+    course_name: str | None = None
 
     def citation(self) -> str:
+        if self.course_name:
+            return f"{self.course_name} - {self.source_name} - {self.section}/chunk {self.chunk_index}"
         return f"{self.source_name} ({self.section})"
 
 
@@ -42,14 +47,15 @@ class CourseMaterialIndexer:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-    def index_all(self) -> dict[str, Any]:
+    def index_all(self, *, course_id: str | None = None, course_name: str | None = None) -> dict[str, Any]:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
         results = []
-        for file_path in sorted(self.uploads_dir.glob("*")):
+        search_root = self._course_upload_dir(course_id) if course_id else self.uploads_dir
+        for file_path in sorted(search_root.glob("*")):
             if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
-                results.append(self.index_file(file_path))
+                results.append(self.index_file(file_path, course_id=course_id, course_name=course_name))
 
-        stats = self.stats()
+        stats = self.stats(course_id=course_id)
         return {
             "ok": all(result["ok"] for result in results) if results else True,
             "indexed_files": sum(1 for result in results if result["ok"]),
@@ -57,7 +63,13 @@ class CourseMaterialIndexer:
             "stats": stats,
         }
 
-    def index_file(self, file_path: Path) -> dict[str, Any]:
+    def index_file(
+        self,
+        file_path: Path,
+        *,
+        course_id: str | None = None,
+        course_name: str | None = None,
+    ) -> dict[str, Any]:
         file_path = file_path.resolve()
         if not file_path.exists() or not file_path.is_file():
             return {"ok": False, "file_name": file_path.name, "reason": "File does not exist."}
@@ -65,7 +77,11 @@ class CourseMaterialIndexer:
             return {"ok": False, "file_name": file_path.name, "reason": "Unsupported file type."}
 
         store = self._load_store()
-        existing_chunks = [chunk for chunk in store["chunks"] if chunk.get("source_path") == str(file_path)]
+        existing_chunks = [
+            chunk
+            for chunk in store["chunks"]
+            if chunk.get("source_path") == str(file_path) and chunk.get("course_id") == course_id
+        ]
         stat = file_path.stat()
         if existing_chunks and all(
             chunk.get("source_mtime") == stat.st_mtime and chunk.get("source_size") == stat.st_size
@@ -86,7 +102,9 @@ class CourseMaterialIndexer:
                     continue
                 chunks.append(
                     {
-                        "id": f"{file_path.name}:{section['label']}:{chunk_index}",
+                        "id": f"{course_id or 'legacy'}:{file_path.name}:{section['label']}:{chunk_index}",
+                        "course_id": course_id,
+                        "course_name": course_name,
                         "source_name": file_path.name,
                         "source_path": str(file_path),
                         "source_mtime": stat.st_mtime,
@@ -102,14 +120,24 @@ class CourseMaterialIndexer:
         if not chunks:
             return {"ok": False, "file_name": file_path.name, "reason": "No readable text was found."}
 
-        store["chunks"] = [chunk for chunk in store["chunks"] if chunk.get("source_path") != str(file_path)]
+        store["chunks"] = [
+            chunk
+            for chunk in store["chunks"]
+            if not (chunk.get("source_path") == str(file_path) and chunk.get("course_id") == course_id)
+        ]
         store["chunks"].extend(chunks)
         store["updated_at_utc"] = datetime.utcnow().isoformat(timespec="seconds")
         self._save_store(store)
 
         return {"ok": True, "file_name": file_path.name, "chunks": len(chunks)}
 
-    def remove_file(self, file_path: Path, *, delete_source: bool = True) -> dict[str, Any]:
+    def remove_file(
+        self,
+        file_path: Path,
+        *,
+        delete_source: bool = True,
+        course_id: str | None = None,
+    ) -> dict[str, Any]:
         file_path = file_path.resolve()
         uploads_dir = self.uploads_dir.resolve()
         if not file_path.is_relative_to(uploads_dir):
@@ -117,7 +145,14 @@ class CourseMaterialIndexer:
 
         store = self._load_store()
         previous_count = len(store["chunks"])
-        store["chunks"] = [chunk for chunk in store["chunks"] if chunk.get("source_path") != str(file_path)]
+        store["chunks"] = [
+            chunk
+            for chunk in store["chunks"]
+            if not (
+                chunk.get("source_path") == str(file_path)
+                and (course_id is None or chunk.get("course_id") == course_id)
+            )
+        ]
         removed_chunks = previous_count - len(store["chunks"])
 
         file_deleted = False
@@ -137,7 +172,14 @@ class CourseMaterialIndexer:
             "removed_chunks": removed_chunks,
         }
 
-    def search(self, query: str, *, top_k: int = 4, min_score: float = 0.05) -> list[RetrievedChunk]:
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int = 4,
+        min_score: float = 0.05,
+        course_id: str | None = None,
+    ) -> list[RetrievedChunk]:
         query_vector = self._embed(query)
         if not query_vector:
             return []
@@ -145,6 +187,8 @@ class CourseMaterialIndexer:
         store = self._load_store()
         scored_chunks = []
         for chunk in store["chunks"]:
+            if course_id is not None and chunk.get("course_id") != course_id:
+                continue
             score = self._cosine_similarity(query_vector, chunk.get("embedding", {}))
             if score >= min_score:
                 scored_chunks.append(
@@ -153,17 +197,25 @@ class CourseMaterialIndexer:
                         section=chunk["section"],
                         text=chunk["text"],
                         score=round(score, 4),
+                        chunk_index=chunk.get("chunk_index", 1),
+                        course_id=chunk.get("course_id"),
+                        course_name=chunk.get("course_name"),
                     )
                 )
 
         return sorted(scored_chunks, key=lambda item: item.score, reverse=True)[:top_k]
 
-    def stats(self) -> dict[str, Any]:
+    def stats(self, *, course_id: str | None = None) -> dict[str, Any]:
         store = self._load_store()
-        source_names = sorted({chunk["source_name"] for chunk in store["chunks"]})
+        chunks = [
+            chunk
+            for chunk in store["chunks"]
+            if course_id is None or chunk.get("course_id") == course_id
+        ]
+        source_names = sorted({chunk["source_name"] for chunk in chunks})
         return {
             "files": len(source_names),
-            "chunks": len(store["chunks"]),
+            "chunks": len(chunks),
             "sources": source_names,
             "updated_at_utc": store.get("updated_at_utc"),
         }
@@ -277,3 +329,8 @@ class CourseMaterialIndexer:
     def _save_store(self, store: dict[str, Any]) -> None:
         self.vector_store_dir.mkdir(parents=True, exist_ok=True)
         self.store_path.write_text(json.dumps(store, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def _course_upload_dir(self, course_id: str | None) -> Path:
+        if not course_id:
+            return self.uploads_dir
+        return self.uploads_dir / course_id

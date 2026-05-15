@@ -7,7 +7,15 @@ import streamlit as st
 from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
 from src.retrieval import CourseMaterialIndexer
-from src.tools.state import get_authenticated_user, get_memory_agent, touch_activity
+from src.tools.state import (
+    course_context,
+    get_active_course,
+    get_authenticated_user,
+    get_memory_agent,
+    require_active_course_message,
+    touch_activity,
+    update_active_course_bucket,
+)
 from src.ui.theme import render_page_hero
 
 
@@ -17,8 +25,12 @@ def render_quiz_page(project_root: Path) -> None:
     auth_user = get_authenticated_user()
     student_email = auth_user.get("email") if auth_user else None
     student_name = (auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None
-    active_plan = st.session_state.get("active_plan")
+    active_course = get_active_course()
+    current_context = course_context()
+    active_plan = current_context.get("active_plan")
     default_topic = _default_topic(active_plan)
+    course_id = active_course["id"] if active_course else None
+    course_name = active_course["name"] if active_course else None
 
     indexer = CourseMaterialIndexer(
         uploads_dir=project_root / "data" / "uploads",
@@ -27,19 +39,24 @@ def render_quiz_page(project_root: Path) -> None:
     quiz_generator = QuizGeneratorAgent()
     evaluator = ProgressEvaluatorAgent()
 
-    attempts = st.session_state.get("quiz_attempts", [])
+    attempts = current_context.get("quiz_attempts", [])
     average_score = round(sum(item["score_percent"] for item in attempts) / len(attempts), 1) if attempts else 0.0
 
     render_page_hero(
         "Assessment Studio",
         "Generate focused quizzes to validate comprehension and monitor mastery over time.",
         chips=[
+            f"Course: {course_name or 'None selected'}",
             f"Attempts: {len(attempts)}",
             f"Average score: {average_score}%",
-            f"RAG chunks: {indexer.stats()['chunks']}",
+            f"RAG chunks: {indexer.stats(course_id=course_id)['chunks']}",
         ],
         accent_chip="Quiz lab",
     )
+
+    course_warning = require_active_course_message()
+    if course_warning:
+        st.info(course_warning)
 
     setup_col, history_col = st.columns([1.6, 1], gap="large")
 
@@ -48,6 +65,24 @@ def render_quiz_page(project_root: Path) -> None:
             st.markdown("#### Quiz setup")
             with st.form("quiz_config_form"):
                 topic = st.text_input("Topic", value=default_topic)
+                difficulty = st.selectbox(
+                    "Difficulty",
+                    options=["easy", "medium", "hard"],
+                    index=1,
+                    format_func=lambda value: value.title(),
+                )
+                question_type_labels = {
+                    "mcq": "MCQ",
+                    "true_false": "True/False",
+                    "short_answer": "Short answer",
+                    "matching": "Matching",
+                }
+                question_types = st.multiselect(
+                    "Question types",
+                    options=list(question_type_labels.keys()),
+                    default=["mcq"],
+                    format_func=lambda value: question_type_labels[value],
+                )
                 question_count = st.number_input(
                     "Number of questions",
                     min_value=1,
@@ -55,7 +90,7 @@ def render_quiz_page(project_root: Path) -> None:
                     step=1,
                     format="%d",
                 )
-                create_quiz = st.form_submit_button("Create quiz", width="stretch")
+                create_quiz = st.form_submit_button("Create quiz", width="stretch", disabled=active_course is None)
 
     with history_col:
         with st.container(border=True):
@@ -71,7 +106,7 @@ def render_quiz_page(project_root: Path) -> None:
 
     if create_quiz:
         language = _detect_language(topic)
-        context_matches = indexer.search(topic, top_k=3)
+        context_matches = indexer.search(topic, top_k=3, course_id=course_id)
         context_chunks = [
             {
                 "source_name": match.source_name,
@@ -86,9 +121,17 @@ def render_quiz_page(project_root: Path) -> None:
             count=question_count,
             context_chunks=context_chunks,
             language=language,
+            difficulty=difficulty,
+            question_types=question_types,
+            previous_questions=current_context.get("generated_questions", []),
         )
-        st.session_state.current_quiz = quiz_result["quiz"]
-        st.session_state.last_quiz_feedback = None
+        generated_questions = current_context.get("generated_questions", [])
+        generated_questions.extend(question["question"] for question in quiz_result["questions"])
+        update_active_course_bucket(
+            current_quiz=quiz_result["quiz"],
+            last_quiz_feedback=None,
+            generated_questions=generated_questions[-120:],
+        )
         touch_activity()
         source_note = f" using {len(context_chunks)} retrieved source chunk(s)" if context_chunks else ""
         st.success(f"Quiz generated{source_note}.")
@@ -113,30 +156,25 @@ def render_quiz_page(project_root: Path) -> None:
     with st.container(border=True):
         st.markdown("#### Answer questions")
         with st.form("quiz_answers_form"):
-            chosen_indices = []
+            answers = []
             for idx, item in enumerate(questions):
-                answer = st.radio(
-                    f"Q{idx + 1}. {item['question']}",
-                    options=list(range(len(item["options"]))),
-                    format_func=lambda option_idx, opts=item["options"]: opts[option_idx],
-                    key=f"quiz_q_{idx}_{item.get('id', idx)}",
-                )
-                chosen_indices.append(answer)
+                answers.append(_render_question_input(idx, item))
 
             submit_answers = st.form_submit_button("Submit answers", width="stretch")
 
     if submit_answers:
         evaluation = evaluator.evaluate(
             questions=questions,
-            selected_indices=chosen_indices,
+            answers=answers,
             topic=quiz.get("topic", "Revision"),
             language=quiz.get("language", "en"),
         )
-        st.session_state.last_quiz_feedback = evaluation
+        update_active_course_bucket(last_quiz_feedback=evaluation)
         if evaluation["ok"]:
             _record_attempt(
                 evaluation=evaluation,
                 active_plan=active_plan,
+                active_course=active_course,
                 memory_agent=memory_agent,
                 student_email=student_email,
                 student_name=student_name,
@@ -147,32 +185,45 @@ def render_quiz_page(project_root: Path) -> None:
         else:
             st.warning(evaluation["message"])
 
-    _render_feedback(st.session_state.get("last_quiz_feedback"))
+    _render_feedback(course_context().get("last_quiz_feedback"))
     _render_flashcards(quiz.get("flashcards", []))
-    _render_attempt_history(st.session_state.get("quiz_attempts", []))
+    _render_attempt_history(course_context().get("quiz_attempts", []))
 
 
 def _record_attempt(
     *,
     evaluation: dict[str, Any],
     active_plan: dict[str, Any] | None,
+    active_course: dict[str, Any] | None,
     memory_agent: Any,
     student_email: str | None,
     student_name: str | None,
 ) -> None:
-    st.session_state.quiz_attempts.append(
+    attempts = course_context().get("quiz_attempts", [])
+    attempts.append(
         {
+            "course_id": active_course["id"] if active_course else None,
+            "course_name": active_course["name"] if active_course else None,
             "timestamp_utc": evaluation["timestamp_utc"],
             "topic": evaluation["topic"],
             "correct": evaluation["correct"],
             "total": evaluation["total"],
             "score_percent": evaluation["score_percent"],
+            "difficulty": evaluation.get("difficulty"),
+            "question_types": sorted({item["type"] for item in evaluation["feedback"]}),
+            "points_earned": evaluation["points_earned"],
+            "total_points": evaluation["total_points"],
             "weak_topics": [item["topic"] for item in evaluation["weak_topics"]],
             "recommendation": evaluation["recommendation"],
         }
     )
+    update_active_course_bucket(quiz_attempts=attempts)
 
-    active_course_name = active_plan.get("course_name") if active_plan else None
+    active_course_name = None
+    if active_course:
+        active_course_name = active_course["name"]
+    elif active_plan:
+        active_course_name = active_plan.get("course_name")
     sync_result = memory_agent.record_quiz_attempt(
         course_name=active_course_name,
         topic=evaluation["topic"],
@@ -197,11 +248,42 @@ def _render_feedback(evaluation: dict[str, Any] | None) -> None:
             status = "Correct" if item["is_correct"] else "Needs review"
             st.markdown(f"**Q{index}. {status}**")
             st.write(item["question"])
+            if item.get("partial_credit"):
+                st.caption(f"Partial credit: {item['score']} point")
             st.caption(f"Your answer: {item['selected_answer'] or 'No answer'}")
             if not item["is_correct"]:
                 st.caption(f"Correct answer: {item['correct_answer']}")
             if item["explanation"]:
                 st.info(item["explanation"])
+
+
+def _render_question_input(index: int, item: dict[str, Any]) -> Any:
+    question_type = item.get("type", "mcq")
+    if question_type in {"mcq", "true_false"}:
+        return st.radio(
+            f"Q{index + 1}. {item['question']}",
+            options=list(range(len(item["options"]))),
+            format_func=lambda option_idx, opts=item["options"]: opts[option_idx],
+            key=f"quiz_q_{index}_{item.get('id', index)}",
+        )
+    if question_type == "short_answer":
+        return st.text_area(
+            f"Q{index + 1}. {item['question']}",
+            key=f"quiz_q_{index}_{item.get('id', index)}",
+            height=100,
+        )
+    if question_type == "matching":
+        st.markdown(f"**Q{index + 1}. {item['question']}**")
+        selected_pairs = {}
+        options = item.get("options", [])
+        for pair_index, pair in enumerate(item.get("pairs", [])):
+            selected_pairs[pair["left"]] = st.selectbox(
+                pair["left"],
+                options=options,
+                key=f"quiz_q_{index}_{item.get('id', index)}_{pair_index}",
+            )
+        return selected_pairs
+    return None
 
 
 def _render_flashcards(flashcards: list[dict[str, str]]) -> None:
@@ -222,7 +304,7 @@ def _render_attempt_history(attempts: list[dict[str, Any]]) -> None:
 
 
 def _current_quiz() -> dict[str, Any] | None:
-    quiz = st.session_state.get("current_quiz")
+    quiz = course_context().get("current_quiz")
     if isinstance(quiz, list):
         return {"topic": "Legacy quiz", "language": "en", "questions": quiz, "flashcards": [], "source_count": 0}
     return quiz if isinstance(quiz, dict) else None

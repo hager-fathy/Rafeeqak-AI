@@ -79,6 +79,44 @@ def test_database_query_agent_answers_progress_and_deadlines() -> None:
     assert "Indexes" in weak_topics["response"]
 
 
+def test_database_query_agent_answers_all_course_summary() -> None:
+    context = {
+        "active_course_name": "Databases",
+        "active_plan": _active_plan(),
+        "quiz_attempts": [{"topic": "Indexes", "score_percent": 60, "weak_topics": ["Indexes"]}],
+        "all_courses": [
+            {
+                "course_id": "db",
+                "course_name": "Databases",
+                "total_tasks": 5,
+                "completed_tasks": 1,
+                "quiz_attempts": 1,
+                "average_score": 60,
+                "uploads": 2,
+                "weak_topics": ["Indexes"],
+                "exam_date": "2026-06-01",
+            },
+            {
+                "course_id": "ml",
+                "course_name": "Machine Learning",
+                "total_tasks": 4,
+                "completed_tasks": 3,
+                "quiz_attempts": 2,
+                "average_score": 82,
+                "uploads": 1,
+                "weak_topics": ["Backpropagation"],
+                "exam_date": "2026-06-10",
+            },
+        ],
+    }
+
+    result = DatabaseQueryAgent().answer(message="Show all courses progress", context=context)
+
+    assert result["scope"] == "all_courses"
+    assert "Databases: 1/5 tasks" in result["response"]
+    assert "Machine Learning: 3/4 tasks" in result["response"]
+
+
 def test_supervisor_routes_database_query_and_cache_hit(tmp_path) -> None:
     cache = SemanticResponseCache(cache_path=tmp_path / "semantic_cache.json", min_similarity=0.9)
     supervisor = SupervisorAgent(semantic_cache=cache)

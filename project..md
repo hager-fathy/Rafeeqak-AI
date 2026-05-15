@@ -1,7 +1,7 @@
 # Rafeeqak Smart Study Planner - Project Brief And Enhanced Roadmap
 
 > **One-sentence pitch:**
-> Rafeeqak is a multilingual, multi-course agentic study assistant that helps students organize courses, upload materials, generate personalized plans, practice with quizzes and flashcards, track weak topics, and prepare smarter for exams.
+> Rafeeqak is a multilingual, multi-course agentic study assistant that helps students organize courses, upload materials, generate personalized plans, practice with quizzes, review flashcards, track weak topics, and prepare smarter for exams.
 
 - **Course context:** Deep Generative Models - Fourth Year Course Project
 - **Target domain:** Education - study planning, exam preparation, course assistant, and personalized learning support
@@ -25,7 +25,7 @@ Rafeeqak should become a study hub where each course has its own:
 - flashcards,
 - weak topics,
 - progress dashboard,
-- deadlines and reminders.
+- deadlines.
 
 ---
 
@@ -38,16 +38,14 @@ Rafeeqak should become a study hub where each course has its own:
 5. **Personalized planning** - Plans consider course difficulty, deadlines, daily hours, progress, and weak topics.
 6. **Better quizzes** - Quizzes use selected-course materials and support difficulty levels plus multiple question types.
 7. **Better evaluation** - Evaluation supports partial scoring, weak-topic tracking, and personalized recommendations.
-8. **Flashcard review** - Flashcards are organized by course and support "I know" / "I don't know" tracking.
+8. **Flashcards** - Flashcards are organized by course for simple review.
 9. **Polished UI** - Improve spacing, colors, labels, buttons, and helpful empty states.
 10. **Full Arabic localization** - Translate UI labels, alerts, errors, and assistant responses; support RTL layout.
 11. **Language toggle** - The student can switch Arabic/English and the preference is saved.
 12. **Friendly errors** - Replace technical errors with clear student-facing messages.
 13. **Reusable prompt templates** - Store prompts in reusable templates instead of hardcoded strings.
-14. **Dashboard by course** - Show progress, scores, weak topics, uploads, deadlines, and useful charts per course.
+14. **Dashboard by course** - Show progress, scores, weak topics, uploads, and deadlines per course.
 15. **Settings page** - Allow editing name, language, daily study hours, quiz preferences, difficulty, and study preferences.
-16. **Notifications and reminders** - Remind students about daily tasks, upcoming exams, delayed tasks, and weak-topic revision.
-17. **Export features** - Export study plans, quiz results, and progress reports.
 
 ---
 
@@ -88,9 +86,7 @@ Supervisor Agent
   +-- Course RAG Agent
   +-- Quiz Generator Agent
   +-- Progress Evaluator Agent
-  +-- Flashcard Agent
   +-- Database Query Agent
-  +-- Notification Agent
   +-- Memory Agent
   |
   v
@@ -119,7 +115,7 @@ Every student-facing feature should include a course identifier.
 | Study plans | `course_id`, `exam_date`, `difficulty`, `daily_hours`, `tasks` |
 | Study tasks | `course_id`, `topic`, `date`, `completed`, `delayed` |
 | Quiz attempts | `course_id`, `topic`, `difficulty`, `score`, `question_types` |
-| Flashcards | `course_id`, `topic`, `front`, `back`, `status` |
+| Flashcards | `course_id`, `topic`, `front`, `back` |
 | Weak topics | `course_id`, `topic`, `source`, `confidence`, `last_seen` |
 | Chat history | `course_id`, `messages`, `created_at` |
 | Settings | user-level defaults plus optional course-level preferences |
@@ -138,12 +134,10 @@ Every student-facing feature should include a course identifier.
 | 4 | Course RAG Agent | Retrieves selected-course material and answers with citations. |
 | 5 | Quiz Generator Agent | Generates course-specific quizzes from topics and materials. |
 | 6 | Progress Evaluator Agent | Grades answers, including partial scoring for text answers. |
-| 7 | Flashcard Agent | Creates and reviews flashcards per course. |
-| 8 | Memory Agent | Stores user profile, course memory, progress, and weak topics. |
-| 9 | Safety Agent | Detects prompt injection and filters unsafe or irrelevant requests. |
-| 10 | Database Query Agent | Answers structured progress, deadline, score, and weak-topic questions. |
-| 11 | Notification Agent | Creates reminders for tasks, exams, delayed work, and weak-topic revision. |
-| 12 | Response Agent | Produces localized student-friendly responses. |
+| 7 | Memory Agent | Stores user profile, course memory, progress, and weak topics. |
+| 8 | Safety Agent | Detects prompt injection and filters unsafe or irrelevant requests. |
+| 9 | Database Query Agent | Answers structured progress, deadline, score, and weak-topic questions. |
+| 10 | Response Agent | Produces localized student-friendly responses. |
 
 ### 6.2 Advanced Memory System
 
@@ -164,9 +158,7 @@ Every student-facing feature should include a course identifier.
 | RAG | Retrieve only from selected-course materials with course/file/page citations. |
 | CAG | Cache repeated questions using course-aware context fingerprints. |
 | Database Query | Query course-specific progress, deadlines, scores, and weak topics. |
-| LLM | Use Gemini/OpenAI wrapper for RAG answers, study plans, and quiz generation. |
-| Export | Generate downloadable study plans, quiz results, and progress reports. |
-| Notifications | Remind students about daily tasks, exams, delayed work, and weak topics. |
+| LLM | Use Gemini wrapper for RAG answers, study plans, and quiz generation. |
 
 ---
 
@@ -188,11 +180,11 @@ Every student-facing feature should include a course identifier.
 | Page | Enhanced Requirements |
 |---|---|
 | Chat | Course-specific chat history, selected-course RAG, localized assistant responses. |
-| Study Plan | Course difficulty, exam deadlines, progress-aware planning, automatic rescheduling. |
+| Study Plan | Course difficulty, exam deadlines, and progress-aware planning. |
 | Upload Materials | Save and index files under selected course; allow delete per course. |
 | Quiz | Course-based quizzes, difficulty selector, MCQ, true/false, short answer, matching. |
-| Flashcards | Course-based review, "I know" / "I don't know", weak-card priority. |
-| Dashboard | Course cards, completed tasks, upcoming tasks, scores, weak topics, uploads, deadlines, charts. |
+| Flashcards | Course-based generated flashcards for quick review. |
+| Dashboard | Course cards, completed tasks, upcoming tasks, scores, weak topics, uploads, and deadlines. |
 | Settings | Name, language, daily hours, difficulty, quiz preferences, study preferences. |
 | Account | Logout and account status. |
 
@@ -218,7 +210,6 @@ Required templates:
 | Quiz generation | `course_name`, `topic`, `difficulty`, `number_of_questions`, `question_types`, `context`, `language` |
 | Progress feedback | `course_name`, `score`, `weak_topics`, `recommendations`, `language` |
 | Study planning | `course_name`, `difficulty`, `exam_deadline`, `daily_hours`, `progress`, `weak_topics`, `language` |
-| Rescheduling | `course_name`, `delayed_tasks`, `remaining_days`, `daily_hours`, `weak_topics`, `language` |
 
 Example template shape:
 
@@ -246,7 +237,7 @@ Course Name - File Name - Page/Chunk.
 ## 9. Enhanced Implementation Plan
 
 **Current status checked:** 2026-05-15
-**Latest verification:** `pytest` passes: 33 passed, 2 warnings.
+**Latest verification:** `.venv\Scripts\python.exe -m pytest` passes: 38 passed, 2 warnings.
 
 Legend:
 
@@ -266,22 +257,21 @@ Legend:
 - [x] Build Streamlit navigation.
 - [x] Add login, sign-up, account pages.
 - [x] Add chat, study plan, upload, quiz, and dashboard pages.
-- [~] Polish page layout, spacing, colors, labels, buttons, and empty states.
+- [x] Polish page layout, spacing, colors, labels, buttons, and empty states.
 
 ### Phase 3 - Database And Memory
 
 - [x] Add Supabase schema and repository.
 - [x] Store student profile, courses, exams, tasks, quiz scores, and weak topics.
 - [x] Sync generated study plans and quiz attempts when Supabase is configured.
-- [ ] Upgrade memory schema and local state for full course-scoped separation.
+- [x] Upgrade memory schema and local state for full course-scoped separation.
 
 ### Phase 4 - Multi-Agent Flow
 
 - [x] Implement Input Router, Supervisor, Study Planner, Memory, Safety, RAG, Quiz, Evaluator, and Database Query agents.
 - [x] Add route trace logging.
 - [x] Wire chat requests through safety, routing, specialist agents, and response generation.
-- [ ] Add Flashcard Agent and Notification Agent.
-- [ ] Add course-aware routing and course-required validation.
+- [x] Add course-aware routing and course-required validation.
 
 ### Phase 5 - RAG System
 
@@ -289,10 +279,10 @@ Legend:
 - [x] Extract text, chunk, embed, and persist local vector store.
 - [x] Implement Course RAG Agent.
 - [x] Add LLM-based RAG answer generation with fallback.
-- [ ] Index uploaded materials by `course_id`.
-- [ ] Search only inside selected-course materials.
-- [ ] Improve chunking, ranking, and citation format.
-- [ ] Citations must include course name, file name, and page/chunk reference.
+- [x] Index uploaded materials by `course_id`.
+- [x] Search only inside selected-course materials.
+- [x] Improve chunking, ranking, and citation format.
+- [x] Citations must include course name, file name, and page/chunk reference.
 
 ### Phase 6 - Quiz And Evaluation
 
@@ -301,29 +291,28 @@ Legend:
 - [x] Store quiz scores and weak topics.
 - [x] Add LLM-based quiz generation with fallback.
 - [x] Allow custom number of questions.
-- [ ] Scope quizzes, attempts, and weak topics by course.
-- [ ] Add difficulty selector.
-- [ ] Support multiple question types: MCQ, true/false, short answer, matching.
-- [ ] Reduce repeated questions per course by tracking previously generated questions.
-- [ ] Add partial scoring for text answers.
-- [ ] Add more detailed feedback and personalized recommendations.
+- [x] Scope quizzes, attempts, and weak topics by course.
+- [x] Add difficulty selector.
+- [x] Support multiple question types: MCQ, true/false, short answer, matching.
+- [x] Reduce repeated questions per course by tracking previously generated questions.
+- [x] Add partial scoring for text answers.
+- [x] Add more detailed feedback and personalized recommendations.
 
 ### Phase 7 - CAG And Structured Database Query
 
 - [x] Add semantic cache for repeated questions.
 - [x] Add structured query handler for progress, deadlines, scores, and weak topics.
-- [ ] Make cache context fingerprints course-aware.
-- [ ] Make structured queries return selected-course and all-course summaries.
+- [x] Make cache context fingerprints course-aware.
+- [x] Make structured queries return selected-course and all-course summaries.
 
 ### Phase 8 - Multi-Course Core Upgrade
 
-- [ ] Add course creation and course management UI.
-- [ ] Add global active-course selector.
-- [ ] Save `active_course_id` and `active_course_name` in session state.
-- [ ] Require course selection before chat, upload, quiz, dashboard, or study plan actions.
-- [ ] Separate materials, plans, quizzes, flashcards, weak topics, progress, and chat by course.
-- [ ] Add friendly no-course empty states.
-- [ ] Add migration strategy for existing single-course local data.
+- [~] Add course creation and course management UI.
+- [x] Add global active-course selector.
+- [x] Save `active_course_id` and `active_course_name` in session state.
+- [x] Require course selection before chat, upload, quiz, dashboard, or study plan actions.
+- [~] Separate materials, plans, quizzes, flashcards, weak topics, progress, and chat by course.
+- [x] Add friendly no-course empty states.
 
 ### Phase 9 - Localization And UI Polish
 
@@ -337,11 +326,10 @@ Legend:
 
 ### Phase 10 - Prompt Templates And LLM Quality
 
-- [x] Add shared LLM client with Gemini preferred and OpenAI fallback.
+- [x] Add shared Gemini LLM client with offline fallback.
 - [ ] Move prompts into reusable prompt template files.
-- [ ] Add templates for course Q&A, RAG answer, lecture summary, quiz generation, progress feedback, study planning, and rescheduling.
+- [ ] Add templates for course Q&A, RAG answer, lecture summary, quiz generation, progress feedback, and study planning.
 - [ ] Add variables for course name, question, context, lecture title, lecture text, topic, difficulty, number of questions, score, weak topics, and recommendations.
-- [ ] Add validation and fallback for malformed LLM outputs.
 
 ### Phase 11 - Study Planner Upgrade
 
@@ -350,22 +338,14 @@ Legend:
 - [ ] Make planning work across multiple courses.
 - [ ] Add course difficulty.
 - [ ] Consider exam deadlines, daily available time, current progress, and weak topics.
-- [ ] Add automatic rescheduling when the student falls behind.
 - [ ] Add delayed-task detection and recovery recommendations.
 
-### Phase 12 - Dashboard, Flashcards, Notifications, And Export
+### Phase 12 - Dashboard, Flashcards, And Settings
 
 - [ ] Dashboard shows progress per course.
 - [ ] Dashboard includes completed tasks, upcoming tasks, quiz scores, average score, weak topics, uploads, and deadlines.
-- [ ] Add simple charts where useful.
 - [ ] Organize flashcards by course.
-- [ ] Add "I know" and "I don't know" flashcard actions.
-- [ ] Track weak flashcards and prioritize them during review.
 - [ ] Add settings page for name, language, daily hours, quiz preferences, difficulty, and study preferences.
-- [ ] Add notifications/reminders for daily tasks, upcoming exams, delayed tasks, and weak-topic revision.
-- [ ] Export study plan.
-- [ ] Export quiz results.
-- [ ] Export progress report.
 
 ### Phase 13 - Testing And Demo
 
@@ -375,8 +355,6 @@ Legend:
 - [ ] Add tests for Arabic localization and RTL.
 - [ ] Add tests for course-scoped RAG retrieval.
 - [ ] Add tests for quiz question types and partial scoring.
-- [ ] Add tests for flashcard review state.
-- [ ] Add tests for exports.
 - [ ] Prepare final demo script.
 - [ ] Run end-to-end manual demo validation.
 
@@ -394,11 +372,11 @@ Legend:
 | Agent orchestration | Complete |
 | Local upload and RAG index | Complete |
 | RAG answer generation | Complete with LLM fallback |
-| Quiz generation | Complete with LLM fallback |
-| Progress evaluation | Complete for MCQ |
+| Quiz generation | Complete with LLM fallback, difficulty, and multiple question types |
+| Progress evaluation | Complete with partial scoring |
 | Semantic cache | Complete |
 | Structured progress queries | Complete |
-| Gemini/OpenAI LLM wrapper | Complete |
+| Gemini LLM wrapper | Complete |
 | Upload deletion | Complete |
 | Custom quiz count | Complete |
 | Adaptive study plan generation | Partial/Improved |
@@ -407,19 +385,17 @@ Legend:
 
 | Area | Status |
 |---|---|
-| Full multi-course separation | Pending |
-| Global course selector | Pending |
-| Course-scoped chat history | Pending |
-| Course-scoped RAG retrieval | Pending |
+| Full multi-course separation | Partial through Phase 5 |
+| Global course selector | Complete |
+| Course-scoped chat history | Complete |
+| Course-scoped RAG retrieval | Complete |
 | Full Arabic localization and RTL | Pending |
 | Reusable prompt templates | Pending |
-| Multiple quiz question types | Pending |
-| Partial scoring for text answers | Pending |
-| Flashcard review workflow | Pending |
+| Multiple quiz question types | Complete |
+| Partial scoring for text answers | Complete |
+| Course flashcard organization | Pending |
 | Settings page | Pending |
-| Notifications/reminders | Pending |
-| Export features | Pending |
-| Dashboard charts and per-course analytics | Pending |
+| Per-course dashboard analytics | Pending |
 
 ---
 
@@ -429,7 +405,7 @@ Legend:
 |---|---|
 | Language | Python |
 | UI | Streamlit |
-| LLM Provider | Gemini via `google-genai`, optional OpenAI fallback |
+| LLM Provider | Gemini via `google-genai` |
 | Agent Orchestration | Custom Python agents and supervisor |
 | Database | Supabase, with local session fallback |
 | Retrieval | Local text extraction, chunking, sparse-vector search |
@@ -457,7 +433,6 @@ Note: `langchain` and `langgraph` are installed but not currently used in the im
 11. Student uploads Databases notes and generates a separate Databases quiz.
 12. Dashboard shows progress for both courses.
 13. Student switches language to Arabic and the UI changes to Arabic RTL.
-14. Student exports the progress report.
 
 ---
 
@@ -465,4 +440,4 @@ Note: `langchain` and `langgraph` are installed but not currently used in the im
 
 Rafeeqak already has a strong single-course demo core: authentication, planning, uploads, RAG, quizzes, weak-topic tracking, semantic cache, structured queries, and LLM integration.
 
-The next major goal is to turn this into a true multi-course study assistant. The most important upgrade is course scoping: every material, chat message, quiz, flashcard, weak topic, progress metric, and study plan must belong to a selected course. After that, localization, prompt templates, better quiz/evaluation logic, dashboard analytics, reminders, and exports will make the project feel complete and polished.
+The next major goal is to turn this into a true multi-course study assistant. The most important upgrade is course scoping: every material, chat message, quiz, flashcard, weak topic, progress metric, and study plan must belong to a selected course. After that, localization, prompt templates, better quiz/evaluation logic, dashboard analytics, and settings will make the project feel complete and polished.

@@ -4,12 +4,16 @@ import streamlit as st
 
 from src.auth import AuthService
 from src.tools.state import (
+    add_course,
     clear_authenticated_user,
+    get_active_course,
     get_authenticated_user,
+    get_courses,
     get_memory_agent,
     init_state,
     is_authenticated,
     set_authenticated_user,
+    set_active_course,
 )
 from src.ui.account_page import render_account_page
 from src.ui.chat_page import render_chat_page
@@ -132,6 +136,46 @@ def main() -> None:
         if selected_page is None:
             selected_page = st.session_state.selected_page
         st.session_state.selected_page = selected_page
+
+    if user:
+        courses = get_courses()
+        active_course = get_active_course()
+        course_col, new_course_col = st.columns([1.5, 1], gap="small")
+        with course_col:
+            st.markdown("<div class='top-nav-title'>Active Course</div>", unsafe_allow_html=True)
+            selected_course_id = st.selectbox(
+                "Active course",
+                options=[course["id"] for course in courses],
+                index=(
+                    [course["id"] for course in courses].index(active_course["id"])
+                    if active_course and active_course["id"] in [course["id"] for course in courses]
+                    else None
+                ),
+                format_func=lambda course_id: next(
+                    (course["name"] for course in courses if course["id"] == course_id),
+                    "Select a course",
+                ),
+                placeholder="Create a course to start",
+                label_visibility="collapsed",
+            )
+            if selected_course_id and selected_course_id != st.session_state.get("active_course_id"):
+                set_active_course(selected_course_id)
+                st.rerun()
+        with new_course_col:
+            with st.form("quick_course_form", border=False):
+                course_name = st.text_input(
+                    "New course",
+                    placeholder="New course name",
+                    label_visibility="collapsed",
+                )
+                submitted = st.form_submit_button("Add course", width="stretch")
+                if submitted:
+                    course = add_course(course_name)
+                    if course is None:
+                        st.warning("Enter a course name first.")
+                    else:
+                        st.success(f"Active course: {course['name']}")
+                        st.rerun()
     pages[selected_page]["handler"](project_root=PROJECT_ROOT)
 
 

@@ -110,6 +110,39 @@ class SupervisorAgent:
             )
         )
 
+        course_required_agents = {
+            "study_planner_agent",
+            "quiz_generator_agent",
+            "course_rag_agent",
+            "database_query_agent",
+        }
+        if (
+            context.get("require_active_course")
+            and selected_agent in course_required_agents
+            and not context.get("active_course_id")
+        ):
+            validation_payload = {
+                "active_course_required": True,
+                "intent": routed_input["intent"],
+            }
+            trace.append(
+                self._trace_step(
+                    "validate_course_scope",
+                    "SupervisorAgent",
+                    "required an active course before running a course-scoped agent",
+                    "blocked",
+                    validation_payload,
+                )
+            )
+            return {
+                "response": self._course_required_response(routed_input["language"]),
+                "intent": routed_input["intent"],
+                "language": routed_input["language"],
+                "agent": "course_scope_validator",
+                "trace": trace,
+                "payload": validation_payload,
+            }
+
         context_fingerprint = self._context_fingerprint(context)
         cached_result = self.semantic_cache.lookup(
             message=routed_input["message"],
@@ -322,7 +355,11 @@ class SupervisorAgent:
         if active_plan and active_plan.get("weak_topics"):
             fallback_topic = active_plan["weak_topics"][0]
         topic = self.quiz_generator.infer_topic(routed_input["message"], fallback=fallback_topic)
-        context_matches = self.course_rag.indexer.search(topic, top_k=3)
+        context_matches = self.course_rag.indexer.search(
+            topic,
+            top_k=3,
+            course_id=context.get("active_course_id"),
+        )
         context_chunks = [
             {
                 "source_name": match.source_name,
@@ -337,6 +374,9 @@ class SupervisorAgent:
             count=5,
             context_chunks=context_chunks,
             language=routed_input["language"],
+            difficulty=context.get("quiz_difficulty", "medium"),
+            question_types=context.get("question_types") or ["mcq"],
+            previous_questions=context.get("generated_questions") or [],
         )
         if routed_input["language"] == "ar":
             response = f"جهزت لك اختبارا من {quiz_result['count']} أسئلة عن {topic}. افتح صفحة Quiz للإجابة عليه."
@@ -362,7 +402,12 @@ class SupervisorAgent:
 
     def _run_course_rag(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         uploads = context.get("uploads", [])
-        rag_result = self.course_rag.answer(routed_input["message"], language=routed_input["language"])
+        rag_result = self.course_rag.answer(
+            routed_input["message"],
+            language=routed_input["language"],
+            course_id=context.get("active_course_id"),
+            course_name=context.get("active_course_name"),
+        )
         response = rag_result["response"]
 
         return {
@@ -464,6 +509,11 @@ class SupervisorAgent:
             return "لا أستطيع المساعدة في طلبات تحاول تجاوز قواعد المساعد."
         return "I cannot help with requests that try to bypass the assistant rules."
 
+    def _course_required_response(self, language: str) -> str:
+        if language == "ar":
+            return "Ø§Ø®ØªØ± Ø£Ùˆ Ø£Ù†Ø´Ø¦ Ù…Ù‚Ø±Ø±Ø§ Ø£ÙˆÙ„Ø§ Ø­ØªÙ‰ Ø£Ø­ÙØ¸ Ø§Ù„Ù…Ø­Ø§Ø¯Ø«Ø© ÙˆØ§Ù„Ù…ÙˆØ§Ø¯ ÙÙŠ Ù…ÙƒØ§Ù†Ù‡Ø§ Ø§Ù„ØµØ­ÙŠØ­."
+        return "Create or select a course first so I can keep this chat, materials, quizzes, and progress in the right course."
+
     def _study_planner_response(
         self,
         planner_result: dict[str, Any],
@@ -496,6 +546,8 @@ class SupervisorAgent:
         uploads = context.get("uploads", []) or []
         fingerprint_data = {
             "course": active_plan.get("course_name") if isinstance(active_plan, dict) else None,
+            "active_course_id": context.get("active_course_id"),
+            "active_course_name": context.get("active_course_name"),
             "exam_date": active_plan.get("exam_date") if isinstance(active_plan, dict) else None,
             "tasks": len(tasks),
             "completed_tasks": sum(1 for task in tasks if task.get("completed")),

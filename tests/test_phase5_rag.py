@@ -34,6 +34,29 @@ def test_course_material_indexer_extracts_chunks_and_searches(tmp_path) -> None:
     assert "Backpropagation" in matches[0].text
 
 
+def test_course_material_search_filters_by_course_id(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    ml_dir = uploads_dir / "ml-course"
+    db_dir = uploads_dir / "db-course"
+    ml_dir.mkdir(parents=True)
+    db_dir.mkdir(parents=True)
+    ml_notes = ml_dir / "ml_notes.txt"
+    db_notes = db_dir / "db_notes.txt"
+    ml_notes.write_text("Backpropagation sends gradients backward through neural layers.", encoding="utf-8")
+    db_notes.write_text("Backpropagation is not part of this database note about indexes.", encoding="utf-8")
+
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    indexer.index_file(ml_notes, course_id="ml-course", course_name="Machine Learning")
+    indexer.index_file(db_notes, course_id="db-course", course_name="Databases")
+
+    matches = indexer.search("backpropagation gradients", course_id="ml-course")
+
+    assert matches
+    assert {match.course_id for match in matches} == {"ml-course"}
+    assert matches[0].citation() == "Machine Learning - ml_notes.txt - text/chunk 1"
+
+
 def test_course_material_indexer_removes_deleted_file_and_chunks(tmp_path) -> None:
     uploads_dir = tmp_path / "uploads"
     vector_store_dir = tmp_path / "vector_store"
@@ -127,3 +150,15 @@ def test_supervisor_routes_course_material_questions_to_rag(tmp_path) -> None:
     assert result["payload"]["ok"] is True
     assert "lecture.txt" in result["response"]
     assert result["trace"][-2]["status"] == "completed"
+
+
+def test_supervisor_blocks_course_scoped_agents_when_course_required(tmp_path) -> None:
+    supervisor = SupervisorAgent(semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"))
+    result = supervisor.handle_message(
+        "Explain gradient descent from the lecture notes",
+        context={"require_active_course": True, "active_course_id": None},
+    )
+
+    assert result["agent"] == "course_scope_validator"
+    assert result["payload"]["active_course_required"] is True
+    assert result["trace"][-1]["step"] == "validate_course_scope"

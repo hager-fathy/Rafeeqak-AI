@@ -9,11 +9,6 @@ from typing import Any
 from dotenv import load_dotenv
 
 try:
-    from openai import OpenAI
-except ModuleNotFoundError:  # pragma: no cover - optional runtime dependency guard
-    OpenAI = None  # type: ignore[assignment]
-
-try:
     from google import genai
     from google.genai import types as genai_types
 except (ImportError, ModuleNotFoundError):  # pragma: no cover - optional runtime dependency guard
@@ -24,7 +19,7 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover - optional runtim
 load_dotenv()
 
 
-PLACEHOLDER_KEYS = {"", "your_openai_api_key_here", "your_gemini_api_key_here", "replace_me"}
+PLACEHOLDER_KEYS = {"", "your_gemini_api_key_here", "replace_me"}
 
 
 @dataclass(frozen=True)
@@ -40,17 +35,10 @@ class LLMSettings:
 
 def get_llm_settings() -> LLMSettings:
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if gemini_key and gemini_key.strip() not in PLACEHOLDER_KEYS:
-        return LLMSettings(
-            provider="gemini",
-            api_key=gemini_key,
-            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-        )
-
     return LLMSettings(
-        provider="openai",
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        provider="gemini",
+        api_key=gemini_key,
+        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
     )
 
 
@@ -63,18 +51,12 @@ class LLMClient:
 
     @property
     def is_available(self) -> bool:
-        if not self.settings.is_configured:
-            return False
-        if self.settings.provider == "gemini":
-            return genai is not None
-        return OpenAI is not None
+        return self.settings.is_configured and genai is not None
 
     def _build_client(self) -> Any | None:
         if not self.is_available:
             return None
-        if self.settings.provider == "gemini":
-            return genai.Client(api_key=self.settings.api_key)
-        return OpenAI(api_key=self.settings.api_key)
+        return genai.Client(api_key=self.settings.api_key)
 
     def generate_text(
         self,
@@ -87,40 +69,12 @@ class LLMClient:
         if self.client is None:
             return None
 
-        if self.settings.provider == "gemini":
-            return self._generate_gemini_text(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-
-        return self._generate_openai_text(
+        return self._generate_gemini_text(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
             max_tokens=max_tokens,
         )
-
-    def _generate_openai_text(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        temperature: float,
-        max_tokens: int,
-    ) -> str | None:
-        response = self.client.chat.completions.create(
-            model=self.settings.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        content = response.choices[0].message.content
-        return content.strip() if content else None
 
     def _generate_gemini_text(
         self,

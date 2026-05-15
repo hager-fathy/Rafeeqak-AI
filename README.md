@@ -13,7 +13,7 @@ The enhanced roadmap in `project..md` now upgrades Rafeeqak toward a stronger mu
 - Phase 7: semantic response cache plus structured progress, deadline, score, and weak-topic queries
 - Phase 8: planned multi-course core upgrade with global course selector and course-scoped data
 - Phase 9: planned full Arabic localization, RTL layout, and UI polish
-- Phase 10+: planned prompt templates, planner upgrades, dashboard analytics, flashcards, reminders, exports, and final demo hardening
+- Phase 10+: planned prompt templates, planner upgrades, dashboard analytics, flashcards, settings, and final demo hardening
 
 ## Quick Start
 
@@ -120,4 +120,4 @@ Upcoming phases should focus on:
 - Reusable prompt templates for RAG, quizzes, summaries, progress feedback, and planning
 - Course-scoped RAG retrieval with clearer citations
 - Better quiz types, partial text scoring, and stronger personalized feedback
-- Per-course dashboard charts, settings page, reminders, and export features
+- Per-course dashboard analytics and settings page
