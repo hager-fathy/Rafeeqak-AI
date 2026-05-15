@@ -1,0 +1,11 @@
+Course: {{course_name}}
+Response language: {{language}}
+
+Student question:
+{{question}}
+
+Course-material excerpts:
+{{context}}
+
+Citation labels:
+{{citations}}

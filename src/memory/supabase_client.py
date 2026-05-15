@@ -8,10 +8,13 @@ from typing import Any
 from dotenv import load_dotenv
 
 try:
-    from supabase import Client, create_client
-except ModuleNotFoundError:  # pragma: no cover - handled by runtime checks
+    import httpx
+    from supabase import Client, ClientOptions, create_client
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - handled by runtime checks
     Client = Any  # type: ignore[misc,assignment]
+    ClientOptions = None  # type: ignore[assignment]
     create_client = None  # type: ignore[assignment]
+    httpx = None  # type: ignore[assignment]
 
 
 load_dotenv()
@@ -23,6 +26,7 @@ class SupabaseSettings:
     key: str | None
     default_student_email: str
     default_student_name: str
+    trust_env_proxy: bool
 
     @property
     def is_configured(self) -> bool:
@@ -35,6 +39,8 @@ def get_supabase_settings() -> SupabaseSettings:
         key=os.getenv("SUPABASE_KEY"),
         default_student_email=os.getenv("SUPABASE_DEFAULT_STUDENT_EMAIL", "student@example.com"),
         default_student_name=os.getenv("SUPABASE_DEFAULT_STUDENT_NAME", "Demo Student"),
+        trust_env_proxy=os.getenv("SUPABASE_TRUST_ENV_PROXY", "").strip().lower()
+        in {"1", "true", "yes", "on"},
     )
 
 
@@ -43,4 +49,11 @@ def get_supabase_client() -> Client | None:
     settings = get_supabase_settings()
     if not settings.is_configured or create_client is None:
         return None
-    return create_client(settings.url, settings.key)
+
+    options = None
+    if ClientOptions is not None and httpx is not None:
+        options = ClientOptions(
+            httpx_client=httpx.Client(trust_env=settings.trust_env_proxy)
+        )
+
+    return create_client(settings.url, settings.key, options)

@@ -1,0 +1,11 @@
+Course: {{course_name}}
+Lecture title: {{lecture_title}}
+
+Lecture text:
+{{lecture_text}}
+
+Return:
+1. Core ideas
+2. Important details
+3. Likely exam questions
+4. A short revision checklist

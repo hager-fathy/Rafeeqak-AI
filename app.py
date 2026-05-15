@@ -4,9 +4,11 @@ import streamlit as st
 
 from src.auth import AuthService
 from src.localization import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, t
+from src.retrieval import CourseMaterialIndexer
 from src.tools.state import (
     add_course,
     clear_authenticated_user,
+    delete_course,
     get_active_course,
     get_authenticated_user,
     get_courses,
@@ -15,6 +17,7 @@ from src.tools.state import (
     init_state,
     is_authenticated,
     mark_language_profile_loaded,
+    rename_course,
     set_authenticated_user,
     set_active_course,
     set_selected_language,
@@ -170,15 +173,16 @@ def main() -> None:
     if user:
         courses = get_courses()
         active_course = get_active_course()
+        course_ids = [course["id"] for course in courses]
         course_col, new_course_col = st.columns([1.5, 1], gap="small")
         with course_col:
             st.markdown(f"<div class='top-nav-title'>{t('nav.active_course', language)}</div>", unsafe_allow_html=True)
             selected_course_id = st.selectbox(
                 t("nav.active_course_label", language),
-                options=[course["id"] for course in courses],
+                options=course_ids,
                 index=(
-                    [course["id"] for course in courses].index(active_course["id"])
-                    if active_course and active_course["id"] in [course["id"] for course in courses]
+                    course_ids.index(active_course["id"])
+                    if active_course and active_course["id"] in course_ids
                     else None
                 ),
                 format_func=lambda course_id: next(
@@ -206,7 +210,86 @@ def main() -> None:
                     else:
                         st.success(t("nav.active_course_success", language, course_name=course["name"]))
                         st.rerun()
+        _render_course_management(courses, active_course, language)
     pages[selected_page]["handler"](project_root=PROJECT_ROOT)
+
+
+def _render_course_management(courses: list[dict], active_course: dict | None, language: str) -> None:
+    with st.expander(t("nav.manage_courses", language), expanded=False):
+        if not courses:
+            st.info(t("nav.no_courses", language))
+            return
+
+        selected_id = st.selectbox(
+            t("nav.manage_course_label", language),
+            options=[course["id"] for course in courses],
+            index=(
+                [course["id"] for course in courses].index(active_course["id"])
+                if active_course and active_course["id"] in [course["id"] for course in courses]
+                else 0
+            ),
+            format_func=lambda course_id: next(
+                (course["name"] for course in courses if course["id"] == course_id),
+                t("course.none_selected", language),
+            ),
+        )
+        selected_course = next((course for course in courses if course["id"] == selected_id), None)
+        if selected_course is None:
+            st.warning(t("nav.course_missing", language))
+            return
+
+        rename_col, delete_col = st.columns([1.4, 1], gap="large")
+        with rename_col:
+            with st.form(f"rename_course_{selected_id}", border=False):
+                new_name = st.text_input(
+                    t("nav.rename_course_name", language),
+                    value=selected_course["name"],
+                )
+                submitted = st.form_submit_button(t("nav.save_course", language), use_container_width=True)
+                if submitted:
+                    result = rename_course(selected_id, new_name)
+                    if result["ok"]:
+                        _course_indexer().rename_course(
+                            course_id=selected_id,
+                            course_name=result["course"]["name"],
+                        )
+                        st.success(t("nav.course_renamed", language, course_name=result["course"]["name"]))
+                        st.rerun()
+                    else:
+                        st.warning(_course_management_reason(result["reason"], language))
+
+        with delete_col:
+            with st.form(f"delete_course_{selected_id}", border=False):
+                st.caption(t("nav.delete_course_caption", language, course_name=selected_course["name"]))
+                confirmed = st.checkbox(t("nav.delete_course_confirm", language))
+                submitted = st.form_submit_button(
+                    t("nav.delete_course", language),
+                    use_container_width=True,
+                    disabled=not confirmed,
+                )
+                if submitted:
+                    _course_indexer().remove_course(course_id=selected_id)
+                    result = delete_course(selected_id)
+                    if result["ok"]:
+                        st.success(t("nav.course_deleted", language, course_name=result["course"]["name"]))
+                        st.rerun()
+                    else:
+                        st.warning(_course_management_reason(result["reason"], language))
+
+
+def _course_indexer() -> CourseMaterialIndexer:
+    return CourseMaterialIndexer(
+        uploads_dir=UPLOADS_DIR,
+        vector_store_dir=VECTOR_STORE_DIR,
+    )
+
+
+def _course_management_reason(reason: str, language: str) -> str:
+    return {
+        "empty_name": t("nav.enter_course_name", language),
+        "duplicate_name": t("nav.duplicate_course_name", language),
+        "missing_course": t("nav.course_missing", language),
+    }.get(reason, reason)
 
 
 def _load_language_from_profile_once(memory_agent, user: dict) -> None:

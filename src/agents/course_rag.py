@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.localization import normalize_language, t
+from src.prompts import render_prompt
 from src.retrieval import CourseMaterialIndexer, RetrievedChunk
 from src.tools.llm_client import LLMClient
 
@@ -94,7 +95,12 @@ class CourseRAGAgent:
         language: str,
         course_name: str | None,
     ) -> tuple[str, str]:
-        llm_answer = self._compose_llm_answer(question, matches, language=language)
+        llm_answer = self._compose_llm_answer(
+            question,
+            matches,
+            language=language,
+            course_name=course_name,
+        )
         if llm_answer:
             return llm_answer, "llm"
 
@@ -128,7 +134,14 @@ class CourseRAGAgent:
         trimmed = compact[:max_length].rsplit(" ", 1)[0].rstrip(" ,;:")
         return f"{trimmed}..."
 
-    def _compose_llm_answer(self, question: str, matches: list[RetrievedChunk], *, language: str) -> str | None:
+    def _compose_llm_answer(
+        self,
+        question: str,
+        matches: list[RetrievedChunk],
+        *,
+        language: str,
+        course_name: str | None,
+    ) -> str | None:
         if not self.llm_client.is_available:
             return None
 
@@ -139,21 +152,18 @@ class CourseRAGAgent:
             )
         response_language = "Arabic" if language == "ar" else "English"
         joined_sources = "\n\n".join(source_blocks)
-        system_prompt = (
-            "You are a careful study assistant. Answer only from the provided course-material excerpts. "
-            "If the excerpts do not support an answer, say that the uploaded material does not contain enough detail. "
-            "Keep the answer concise and include a final Sources line using the given citation labels."
-        )
-        user_prompt = (
-            f"Response language: {response_language}\n\n"
-            f"Student question:\n{question}\n\n"
-            "Course-material excerpts:\n"
-            f"{joined_sources}"
+        prompt = render_prompt(
+            "rag_answer",
+            course_name=course_name or ("this course" if language != "ar" else "هذا المقرر"),
+            question=question,
+            context=joined_sources,
+            citations="; ".join(match.citation() for match in matches),
+            language=response_language,
         )
         try:
             return self.llm_client.generate_text(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
+                system_prompt=prompt.system,
+                user_prompt=prompt.user,
                 temperature=0.2,
                 max_tokens=700,
             )

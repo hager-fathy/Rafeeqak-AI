@@ -121,6 +121,7 @@ def render_quiz_page(project_root: Path) -> None:
             {
                 "source_name": match.source_name,
                 "section": match.section,
+                "course_name": course_name,
                 "text": match.text,
                 "score": match.score,
             }

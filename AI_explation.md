@@ -1,6 +1,6 @@
 # AI Explanation
 
-This file explains what AI model integration the Smart Study Planner uses, how to use it, why it is useful, and where the important code lives.
+This file explains what AI model integration the Smart Study Planner uses, how to configure it, where the prompt templates live, how the app falls back when AI is unavailable, and which code paths use the model.
 
 ## What The App Uses
 
@@ -14,10 +14,10 @@ The wrapper supports:
 
 | Provider | Environment variable | Default model |
 |---|---|---|
-| Gemini | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+| Gemini | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.5-flash` |
 | Offline fallback | no key needed | Python templates/rules |
 
-If `GEMINI_API_KEY` is configured, the app uses Gemini. If Gemini is not configured, the app still works with offline deterministic logic.
+If `GEMINI_API_KEY` is configured, the app can use Gemini. If Gemini is missing, unavailable, or returns invalid output, the app still works with deterministic offline logic.
 
 ## How To Use Gemini
 
@@ -29,7 +29,7 @@ GEMINI_API_KEY=your_real_gemini_key
 GEMINI_MODEL=gemini-2.5-flash
 ```
 
-3. Make sure dependencies are installed:
+3. Install dependencies:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -43,15 +43,15 @@ GEMINI_MODEL=gemini-2.5-flash
 
 ## Why The App Uses AI
 
-The AI model is used to make the app less fixed and more personalized.
+The AI model is used to make the study assistant less fixed and more personalized.
 
 | Feature | Why AI helps |
 |---|---|
-| Study Plan | Creates more personalized daily tasks from course name, exam date, weak topics, and daily hours. |
-| Course RAG Chat | Reads retrieved chunks from uploaded materials and writes a clearer answer with sources. |
+| Study Plan | Creates more personalized daily tasks from course name, difficulty, exam deadline, weak topics, progress, and daily hours. |
+| Course RAG Chat | Reads retrieved chunks from uploaded course materials and writes a clearer answer with sources. |
 | Quiz Generator | Creates custom MCQs and flashcards from the topic and uploaded course context. |
 
-The app still keeps fallback logic because demos and tests should work even without an API key or internet connection.
+The app keeps offline fallback logic because demos and tests should work even without an API key or internet connection.
 
 ## Main AI Client Code
 
@@ -61,18 +61,11 @@ File:
 src/tools/llm_client.py
 ```
 
-Important provider selection code:
+Provider settings:
 
 ```python
 def get_llm_settings() -> LLMSettings:
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if gemini_key and gemini_key.strip() not in PLACEHOLDER_KEYS:
-        return LLMSettings(
-            provider="gemini",
-            api_key=gemini_key,
-            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-        )
-
     return LLMSettings(
         provider="gemini",
         api_key=gemini_key,
@@ -80,7 +73,7 @@ def get_llm_settings() -> LLMSettings:
     )
 ```
 
-Important Gemini call:
+Gemini call:
 
 ```python
 response = self.client.models.generate_content(
@@ -93,6 +86,59 @@ response = self.client.models.generate_content(
     ),
 )
 ```
+
+JSON helper:
+
+```python
+payload = llm_client.generate_json(
+    system_prompt=prompt.system,
+    user_prompt=prompt.user,
+)
+```
+
+The JSON helper extracts and validates a JSON object from the model response. Agents still validate the returned structure before using it.
+
+## Prompt Template System
+
+Phase 10 moved prompts out of hardcoded agent strings into reusable template files.
+
+Prompt registry:
+
+```text
+src/prompts/registry.py
+```
+
+Prompt templates:
+
+```text
+src/prompts/templates/
+```
+
+Available templates:
+
+| Template | Files | Main variables |
+|---|---|---|
+| Course Q&A | `course_question.system.txt`, `course_question.user.txt` | `course_name`, `question`, `language` |
+| RAG answer | `rag_answer.system.txt`, `rag_answer.user.txt` | `course_name`, `question`, `context`, `citations`, `language` |
+| Lecture summary | `lecture_summary.system.txt`, `lecture_summary.user.txt` | `course_name`, `lecture_title`, `lecture_text`, `language` |
+| Quiz generation | `quiz_generation.system.txt`, `quiz_generation.user.txt` | `course_name`, `topic`, `difficulty`, `number_of_questions`, `question_types`, `context`, `language` |
+| Progress feedback | `progress_feedback.system.txt`, `progress_feedback.user.txt` | `course_name`, `score`, `weak_topics`, `recommendations`, `language` |
+| Study planning | `study_planning.system.txt`, `study_planning.user.txt` | `course_name`, `difficulty`, `exam_deadline`, `daily_hours`, `progress`, `weak_topics`, `language` |
+
+Prompt rendering example:
+
+```python
+prompt = render_prompt(
+    "rag_answer",
+    course_name=course_name,
+    question=question,
+    context=joined_sources,
+    citations=citation_labels,
+    language=response_language,
+)
+```
+
+The registry uses `{{variable}}` placeholders. This avoids conflicts with JSON examples inside prompt files.
 
 ## Where AI Is Used
 
@@ -112,24 +158,20 @@ _generate_tasks_with_llm(...)
 
 What it does:
 
-- Sends the course name, exam date, weak topics, other topics, and daily study hours to the LLM.
-- Requests a JSON plan.
-- Validates the returned tasks.
+- Renders the `study_planning` prompt template.
+- Sends course name, difficulty, exam deadline, daily hours, progress, weak topics, language, and planning context.
+- Requests JSON with daily tasks.
+- Validates task count and task fields.
 - Falls back to the offline planner if the LLM is unavailable or returns invalid data.
 
-Example logic:
+Important call shape:
 
 ```python
-tasks = self._generate_tasks_with_llm(
-    course_name=course_name,
-    exam_date=exam_date,
-    daily_hours=daily_hours,
-    weak_topics=weak_topics,
-    other_topics=other_topics,
-    days_until_exam=days_until_exam,
-    today=today,
+prompt = render_prompt("study_planning", ...)
+payload = self.llm_client.generate_json(
+    system_prompt=prompt.system,
+    user_prompt=prompt.user,
 )
-generation_mode = "llm" if tasks else "offline_template"
 ```
 
 ### 2. Course RAG Chat
@@ -149,21 +191,12 @@ _compose_llm_answer(...)
 What it does:
 
 - Retrieves relevant text chunks from uploaded course materials.
-- Sends only those chunks and the student question to the LLM.
+- Renders the `rag_answer` prompt template.
+- Sends only retrieved chunks, citation labels, course name, and the student question to the LLM.
 - Tells the model to answer only from uploaded material.
 - Includes sources in the final answer.
 
-Example prompt rule:
-
-```python
-system_prompt = (
-    "You are a careful study assistant. Answer only from the provided course-material excerpts. "
-    "If the excerpts do not support an answer, say that the uploaded material does not contain enough detail. "
-    "Keep the answer concise and include a final Sources line using the given citation labels."
-)
-```
-
-Why this is important:
+Why this matters:
 
 The LLM should not invent course content. It should answer from the uploaded files only.
 
@@ -183,7 +216,8 @@ _generate_with_llm(...)
 
 What it does:
 
-- Sends the topic and retrieved course chunks to the LLM.
+- Renders the `quiz_generation` prompt template.
+- Sends course name, topic, difficulty, question count, question type, language, and retrieved course context.
 - Requests structured JSON with MCQs and flashcards.
 - Validates every question before using it.
 - Falls back to offline quiz templates if the LLM output is invalid.
@@ -210,6 +244,16 @@ Expected JSON shape:
 }
 ```
 
+## Templates Prepared For Future AI Use
+
+Some templates are already present even if the current UI does not yet expose a dedicated LLM feature for them:
+
+- `course_question`
+- `lecture_summary`
+- `progress_feedback`
+
+They are ready for future Phase 11+ agent upgrades.
+
 ## Fallback Behavior
 
 The app is designed to avoid breaking when the LLM is unavailable.
@@ -218,42 +262,32 @@ If Gemini fails:
 
 - Study plan uses Python planner logic.
 - RAG chat uses retrieved text snippets directly.
-- Quiz generator uses local MCQ templates.
+- Quiz generator uses local quiz templates.
 
-This is why many responses include:
-
-```python
-generation_mode = "llm" if tasks else "offline_template"
-```
-
-or:
-
-```python
-return None
-```
-
-The agent sees `None` and falls back to the older offline logic.
-
-## How To Know If AI Was Used
-
-Some returned payloads include:
-
-```python
-"generation_mode": "llm"
-```
-
-or:
-
-```python
-"generation_mode": "offline_template"
-```
-
-Meaning:
+Common generation modes:
 
 | Mode | Meaning |
 |---|---|
 | `llm` | Gemini generated the result. |
 | `offline_template` | The app used local Python logic instead. |
+
+## Testing
+
+AI and prompt behavior is covered by tests:
+
+```text
+tests/test_llm_client.py
+tests/test_phase10_prompts.py
+tests/test_phase4_agents.py
+tests/test_phase5_rag.py
+tests/test_phase6_quiz.py
+```
+
+Latest verified full test result:
+
+```text
+51 passed
+```
 
 ## Dependencies
 
@@ -263,7 +297,7 @@ The Gemini SDK dependency is in:
 requirements.txt
 ```
 
-Code:
+Dependency:
 
 ```text
 google-genai>=1.0.0
@@ -271,4 +305,4 @@ google-genai>=1.0.0
 
 ## Short Summary
 
-The app now uses Gemini through `GEMINI_API_KEY`. The AI is used in study planning, course-material answers, and quiz generation. The app also keeps offline fallback logic so it remains stable during tests, demos, or missing API-key situations.
+The app uses Gemini through `GEMINI_API_KEY` or `GOOGLE_API_KEY`. AI is used in study planning, course-material answers, and quiz generation. Prompts now live in reusable template files under `src/prompts/templates`, rendered through `src/prompts/registry.py`. The app keeps deterministic offline fallback logic so it remains stable during tests, demos, missing API-key situations, or temporary AI failures.

@@ -172,6 +172,48 @@ class CourseMaterialIndexer:
             "removed_chunks": removed_chunks,
         }
 
+    def rename_course(self, *, course_id: str, course_name: str) -> dict[str, Any]:
+        store = self._load_store()
+        renamed_chunks = 0
+        for chunk in store["chunks"]:
+            if chunk.get("course_id") == course_id:
+                chunk["course_name"] = course_name
+                renamed_chunks += 1
+
+        if renamed_chunks:
+            store["updated_at_utc"] = datetime.utcnow().isoformat(timespec="seconds")
+            self._save_store(store)
+
+        return {"ok": True, "renamed_chunks": renamed_chunks}
+
+    def remove_course(self, *, course_id: str) -> dict[str, Any]:
+        store = self._load_store()
+        previous_count = len(store["chunks"])
+        store["chunks"] = [chunk for chunk in store["chunks"] if chunk.get("course_id") != course_id]
+        removed_chunks = previous_count - len(store["chunks"])
+
+        course_dir = self._course_upload_dir(course_id)
+        removed_files = 0
+        if course_dir.exists():
+            for file_path in course_dir.glob("*"):
+                if file_path.is_file():
+                    file_path.unlink()
+                    removed_files += 1
+            try:
+                course_dir.rmdir()
+            except OSError:
+                pass
+
+        if removed_chunks or removed_files:
+            store["updated_at_utc"] = datetime.utcnow().isoformat(timespec="seconds")
+            self._save_store(store)
+
+        return {
+            "ok": True,
+            "removed_chunks": removed_chunks,
+            "removed_files": removed_files,
+        }
+
     def search(
         self,
         query: str,

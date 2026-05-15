@@ -1,0 +1,9 @@
+Course: {{course_name}}
+Difficulty: {{difficulty}}
+Exam deadline: {{exam_deadline}}
+Available hours per day: {{daily_hours}}
+Current progress: {{progress}}
+Weak topics: {{weak_topics}}
+Language: {{language}}
+
+Use weak topics more often than regular topics. Include checkpoint quiz days and final review.

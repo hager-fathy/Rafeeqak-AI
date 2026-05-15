@@ -302,11 +302,11 @@ Legend:
 
 ### Phase 8 - Multi-Course Core Upgrade
 
-- [~] Add course creation and course management UI.
+- [x] Add course creation and course management UI.
 - [x] Add global active-course selector.
 - [x] Save `active_course_id` and `active_course_name` in session state.
 - [x] Require course selection before chat, upload, quiz, dashboard, or study plan actions.
-- [~] Separate materials, plans, quizzes, weak topics, progress, and chat by course.
+- [x] Separate materials, plans, quizzes, weak topics, progress, route traces, and chat by course.
 - [x] Add friendly no-course empty states.
 
 ### Phase 9 - Localization And UI Polish
@@ -322,9 +322,9 @@ Legend:
 ### Phase 10 - Prompt Templates And LLM Quality
 
 - [x] Add shared Gemini LLM client with offline fallback.
-- [ ] Move prompts into reusable prompt template files.
-- [ ] Add templates for course Q&A, RAG answer, lecture summary, quiz generation, progress feedback, and study planning.
-- [ ] Add variables for course name, question, context, lecture title, lecture text, topic, difficulty, number of questions, score, weak topics, and recommendations.
+- [x] Move prompts into reusable prompt template files.
+- [x] Add templates for course Q&A, RAG answer, lecture summary, quiz generation, progress feedback, and study planning.
+- [x] Add variables for course name, question, context, lecture title, lecture text, topic, difficulty, number of questions, score, weak topics, and recommendations.
 
 ### Phase 11 - Study Planner Upgrade
 
@@ -379,12 +379,12 @@ Legend:
 
 | Area | Status |
 |---|---|
-| Full multi-course separation | Partial through Phase 5 |
+| Full multi-course separation | Complete |
 | Global course selector | Complete |
 | Course-scoped chat history | Complete |
 | Course-scoped RAG retrieval | Complete |
 | Full Arabic localization and RTL | Complete |
-| Reusable prompt templates | Pending |
+| Reusable prompt templates | Complete |
 | Multiple quiz question types | Complete |
 | Partial scoring for text answers | Complete |
 | Settings page | Pending |

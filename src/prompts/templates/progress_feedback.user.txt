@@ -1,0 +1,9 @@
+Course: {{course_name}}
+Score: {{score}}
+Weak topics: {{weak_topics}}
+Current recommendations: {{recommendations}}
+
+Return:
+1. A short diagnosis
+2. The next two study actions
+3. One quiz or recall task

@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from src.localization import normalize_language, t
+from src.prompts import render_prompt
 from src.tools.llm_client import LLMClient
 
 
@@ -420,26 +421,21 @@ class QuizGeneratorAgent:
             source_text = "No uploaded material excerpts were retrieved. Generate from the topic only."
 
         response_language = "Arabic" if language == "ar" else "English"
-        system_prompt = (
-            "You generate study quizzes. Return only valid JSON with this shape: "
-            '{"questions":[{"question":"...","options":["...","...","...","..."],'
-            '"answer_index":0,"explanation":"...","source":"..."}],'
-            '"flashcards":[{"front":"...","back":"..."}]}. '
-            "Every question must have exactly four options and answer_index must be 0, 1, 2, or 3."
-        )
-        user_prompt = (
-            f"Language: {response_language}\n"
-            f"Topic: {topic}\n"
-            f"Difficulty: {difficulty}\n"
-            f"Number of MCQs: {count}\n\n"
-            "Course context:\n"
-            f"{source_text}"
+        prompt = render_prompt(
+            "quiz_generation",
+            course_name=self._course_name_from_context(context_chunks),
+            topic=topic,
+            difficulty=difficulty,
+            number_of_questions=count,
+            question_types=", ".join(question_types),
+            context=source_text,
+            language=response_language,
         )
 
         try:
             payload = self.llm_client.generate_json(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
+                system_prompt=prompt.system,
+                user_prompt=prompt.user,
                 temperature=0.4,
                 max_tokens=1600,
             )
@@ -490,6 +486,13 @@ class QuizGeneratorAgent:
                 }
             )
         return questions
+
+    def _course_name_from_context(self, context_chunks: list[dict[str, Any]]) -> str:
+        for chunk in context_chunks:
+            course_name = str(chunk.get("course_name") or "").strip()
+            if course_name:
+                return course_name
+        return "Active course"
 
     def _normalize_llm_flashcards(self, raw_flashcards: Any) -> list[dict[str, str]]:
         if not isinstance(raw_flashcards, list):

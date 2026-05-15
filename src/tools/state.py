@@ -1,7 +1,10 @@
+import json
 import hashlib
+import os
 import re
 from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 
@@ -19,7 +22,10 @@ COURSE_SCOPED_KEYS = (
     "last_quiz_feedback",
     "uploads",
     "generated_questions",
+    "route_traces",
 )
+
+WORKSPACE_VERSION = 1
 
 
 def _empty_course_bucket() -> dict:
@@ -32,7 +38,18 @@ def _empty_course_bucket() -> dict:
         "last_quiz_feedback": None,
         "uploads": [],
         "generated_questions": [],
+        "route_traces": [],
     }
+
+
+def _normalize_course_bucket(bucket: dict | None) -> dict:
+    normalized = _empty_course_bucket()
+    if isinstance(bucket, dict):
+        for key in COURSE_SCOPED_KEYS:
+            value = bucket.get(key)
+            if value is not None:
+                normalized[key] = value
+    return normalized
 
 
 def init_state() -> None:
@@ -57,6 +74,8 @@ def init_state() -> None:
         "selected_language": "en",
         "language_profile_loaded": False,
         "language_sync_notice": None,
+        "workspace_loaded_for": None,
+        "workspace_persistence_notice": None,
     }
 
     for key, value in defaults.items():
@@ -79,6 +98,7 @@ def add_course(course_name: str, *, difficulty: str = "Medium") -> dict | None:
     for course in st.session_state.get("courses", []):
         if course["name"].casefold() == normalized_name.casefold():
             set_active_course(course["id"])
+            _save_user_workspace()
             return course
 
     course_id = _course_id(normalized_name)
@@ -92,6 +112,7 @@ def add_course(course_name: str, *, difficulty: str = "Medium") -> dict | None:
     st.session_state["course_data"][course_id] = _empty_course_bucket()
     set_active_course(course_id)
     touch_activity()
+    _save_user_workspace()
     return course
 
 
@@ -107,18 +128,72 @@ def get_active_course() -> dict | None:
     return None
 
 
+def rename_course(course_id: str, course_name: str) -> dict:
+    normalized_name = " ".join(course_name.split())
+    if not normalized_name:
+        return {"ok": False, "reason": "empty_name"}
+
+    courses = get_courses()
+    matching_course = next((course for course in courses if course["id"] == course_id), None)
+    if matching_course is None:
+        return {"ok": False, "reason": "missing_course"}
+
+    duplicate = next(
+        (
+            course
+            for course in courses
+            if course["id"] != course_id and course["name"].casefold() == normalized_name.casefold()
+        ),
+        None,
+    )
+    if duplicate is not None:
+        return {"ok": False, "reason": "duplicate_name"}
+
+    matching_course["name"] = normalized_name
+    _rename_course_references(course_id, normalized_name)
+    if st.session_state.get("active_course_id") == course_id:
+        st.session_state["active_course_name"] = normalized_name
+        sync_active_course_aliases()
+    touch_activity()
+    _save_user_workspace()
+    return {"ok": True, "course": matching_course}
+
+
+def delete_course(course_id: str) -> dict:
+    courses = get_courses()
+    course = next((item for item in courses if item["id"] == course_id), None)
+    if course is None:
+        return {"ok": False, "reason": "missing_course"}
+
+    st.session_state["courses"] = [item for item in courses if item["id"] != course_id]
+    st.session_state.setdefault("course_data", {}).pop(course_id, None)
+
+    if st.session_state.get("active_course_id") == course_id:
+        next_course = st.session_state["courses"][0] if st.session_state["courses"] else None
+        set_active_course(next_course["id"] if next_course else None)
+    else:
+        sync_active_course_aliases()
+
+    touch_activity()
+    _save_user_workspace()
+    return {"ok": True, "course": course}
+
+
 def set_active_course(course_id: str | None) -> None:
     course = next((item for item in get_courses() if item["id"] == course_id), None)
     if course is None:
         st.session_state["active_course_id"] = None
         st.session_state["active_course_name"] = None
-        sync_active_course_aliases()
+        for key, value in _empty_course_bucket().items():
+            st.session_state[key] = value
+        _save_user_workspace()
         return
 
     st.session_state["active_course_id"] = course["id"]
     st.session_state["active_course_name"] = course["name"]
     st.session_state.setdefault("course_data", {}).setdefault(course["id"], _empty_course_bucket())
     sync_active_course_aliases()
+    _save_user_workspace()
 
 
 def require_active_course_message() -> str | None:
@@ -137,6 +212,8 @@ def set_selected_language(language: str | None) -> bool:
     normalized = normalize_language(language)
     changed = normalized != st.session_state.get("selected_language")
     st.session_state["selected_language"] = normalized
+    if changed:
+        _save_user_workspace()
     return changed
 
 
@@ -152,17 +229,22 @@ def get_active_course_bucket() -> dict:
     active_course = get_active_course()
     if active_course is None:
         return _empty_course_bucket()
-    return st.session_state.setdefault("course_data", {}).setdefault(active_course["id"], _empty_course_bucket())
+    course_data = st.session_state.setdefault("course_data", {})
+    bucket = _normalize_course_bucket(course_data.get(active_course["id"]))
+    course_data[active_course["id"]] = bucket
+    return bucket
 
 
 def sync_active_course_aliases() -> None:
     active_course = get_active_course()
     if active_course is None:
+        for key, value in _empty_course_bucket().items():
+            st.session_state[key] = value
         return
 
     bucket = get_active_course_bucket()
     for key in COURSE_SCOPED_KEYS:
-        st.session_state[key] = bucket.get(key)
+        st.session_state[key] = bucket[key]
 
 
 def update_active_course_bucket(**values: object) -> None:
@@ -175,6 +257,7 @@ def update_active_course_bucket(**values: object) -> None:
         if key in COURSE_SCOPED_KEYS:
             bucket[key] = value
             st.session_state[key] = value
+    _save_user_workspace()
 
 
 def course_context() -> dict:
@@ -281,6 +364,7 @@ def append_route_trace(trace: list[dict]) -> None:
         st.session_state["route_traces"] = []
     st.session_state["route_traces"].append(trace)
     st.session_state["route_traces"] = st.session_state["route_traces"][-20:]
+    update_active_course_bucket(route_traces=st.session_state["route_traces"])
 
 
 def set_authenticated_user(
@@ -292,13 +376,16 @@ def set_authenticated_user(
     st.session_state["auth_user"] = user
     st.session_state["auth_access_token"] = access_token
     st.session_state["auth_refresh_token"] = refresh_token
+    load_user_workspace(user)
 
 
 def clear_authenticated_user() -> None:
+    _save_user_workspace()
     st.session_state["auth_user"] = None
     st.session_state["auth_access_token"] = None
     st.session_state["auth_refresh_token"] = None
     st.session_state["language_profile_loaded"] = False
+    st.session_state["workspace_loaded_for"] = None
 
 
 def get_authenticated_user() -> dict | None:
@@ -307,3 +394,163 @@ def get_authenticated_user() -> dict | None:
 
 def is_authenticated() -> bool:
     return st.session_state.get("auth_user") is not None
+
+
+def load_user_workspace(user: dict | None = None) -> dict:
+    email = _user_email(user or get_authenticated_user())
+    if not email:
+        return {"ok": False, "reason": "missing_email"}
+    if st.session_state.get("workspace_loaded_for") == email:
+        return {"ok": True, "loaded": False, "reason": "already_loaded"}
+
+    workspace_path = _workspace_path_for_email(email)
+    if not workspace_path.exists():
+        _reset_workspace_state()
+        st.session_state["workspace_loaded_for"] = email
+        st.session_state["workspace_persistence_notice"] = "empty"
+        return {"ok": True, "loaded": False, "reason": "not_found"}
+
+    try:
+        payload = json.loads(workspace_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        _reset_workspace_state()
+        st.session_state["workspace_loaded_for"] = email
+        st.session_state["workspace_persistence_notice"] = f"load_failed:{exc}"
+        return {"ok": False, "loaded": False, "reason": str(exc)}
+
+    workspace = payload.get("workspace", {}) if isinstance(payload, dict) else {}
+    if not isinstance(workspace, dict):
+        _reset_workspace_state()
+        st.session_state["workspace_loaded_for"] = email
+        st.session_state["workspace_persistence_notice"] = "invalid"
+        return {"ok": False, "loaded": False, "reason": "invalid_workspace"}
+
+    _apply_workspace_state(workspace)
+    st.session_state["workspace_loaded_for"] = email
+    st.session_state["workspace_persistence_notice"] = "loaded"
+    return {"ok": True, "loaded": True, "path": str(workspace_path)}
+
+
+def _rename_course_references(course_id: str, course_name: str) -> None:
+    bucket = st.session_state.setdefault("course_data", {}).setdefault(course_id, _empty_course_bucket())
+    for item in bucket.get("uploads", []) or []:
+        item["course_name"] = course_name
+    for item in bucket.get("quiz_attempts", []) or []:
+        item["course_name"] = course_name
+
+    for plan in bucket.get("study_plans", []) or []:
+        if isinstance(plan, dict):
+            plan["course_name"] = course_name
+
+    active_plan = bucket.get("active_plan")
+    if isinstance(active_plan, dict):
+        active_plan["course_name"] = course_name
+
+    current_quiz = bucket.get("current_quiz")
+    if isinstance(current_quiz, dict):
+        current_quiz["course_name"] = course_name
+
+
+def _save_user_workspace() -> dict:
+    if st.session_state.get("workspace_loading"):
+        return {"ok": False, "reason": "loading"}
+
+    user = get_authenticated_user()
+    email = _user_email(user)
+    if not email:
+        return {"ok": False, "reason": "missing_email"}
+
+    workspace_path = _workspace_path_for_email(email)
+    payload = {
+        "version": WORKSPACE_VERSION,
+        "email": email,
+        "updated_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
+        "workspace": _current_workspace_state(),
+    }
+    try:
+        workspace_path.parent.mkdir(parents=True, exist_ok=True)
+        workspace_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        st.session_state["workspace_persistence_notice"] = f"save_failed:{exc}"
+        return {"ok": False, "reason": str(exc)}
+
+    st.session_state["workspace_loaded_for"] = email
+    st.session_state["workspace_persistence_notice"] = "saved"
+    return {"ok": True, "path": str(workspace_path)}
+
+
+def _current_workspace_state() -> dict:
+    course_data = st.session_state.get("course_data", {})
+    normalized_course_data = {}
+    if isinstance(course_data, dict):
+        for course_id, bucket in course_data.items():
+            normalized_course_data[str(course_id)] = _normalize_course_bucket(bucket)
+
+    return {
+        "courses": deepcopy(st.session_state.get("courses", [])),
+        "active_course_id": st.session_state.get("active_course_id"),
+        "active_course_name": st.session_state.get("active_course_name"),
+        "course_data": normalized_course_data,
+        "selected_language": get_selected_language(),
+    }
+
+
+def _apply_workspace_state(workspace: dict) -> None:
+    st.session_state["workspace_loading"] = True
+    try:
+        courses = workspace.get("courses", [])
+        st.session_state["courses"] = courses if isinstance(courses, list) else []
+
+        raw_course_data = workspace.get("course_data", {})
+        course_data = {}
+        if isinstance(raw_course_data, dict):
+            for course_id, bucket in raw_course_data.items():
+                course_data[str(course_id)] = _normalize_course_bucket(bucket)
+        st.session_state["course_data"] = course_data
+
+        st.session_state["active_course_id"] = workspace.get("active_course_id")
+        st.session_state["active_course_name"] = workspace.get("active_course_name")
+        st.session_state["selected_language"] = normalize_language(workspace.get("selected_language"))
+
+        if get_active_course() is None:
+            next_course = st.session_state["courses"][0] if st.session_state["courses"] else None
+            st.session_state["active_course_id"] = next_course["id"] if next_course else None
+            st.session_state["active_course_name"] = next_course["name"] if next_course else None
+        sync_active_course_aliases()
+    finally:
+        st.session_state["workspace_loading"] = False
+
+
+def _reset_workspace_state() -> None:
+    st.session_state["workspace_loading"] = True
+    try:
+        st.session_state["courses"] = []
+        st.session_state["active_course_id"] = None
+        st.session_state["active_course_name"] = None
+        st.session_state["course_data"] = {}
+        st.session_state["selected_language"] = "en"
+        for key, value in _empty_course_bucket().items():
+            st.session_state[key] = value
+    finally:
+        st.session_state["workspace_loading"] = False
+
+
+def _workspace_path_for_email(email: str) -> Path:
+    digest = hashlib.sha256(email.casefold().encode("utf-8")).hexdigest()[:24]
+    return _workspace_store_dir() / f"{digest}.json"
+
+
+def _workspace_store_dir() -> Path:
+    configured = os.getenv("RAFEEQAK_USER_STATE_DIR")
+    if configured:
+        return Path(configured)
+    return Path("data") / "user_state"
+
+
+def _user_email(user: dict | None) -> str | None:
+    if not isinstance(user, dict):
+        return None
+    email = user.get("email")
+    if not email:
+        return None
+    return str(email).strip().casefold() or None

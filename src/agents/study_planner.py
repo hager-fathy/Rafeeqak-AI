@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from src.localization import normalize_language, t
+from src.prompts import render_prompt
 from src.tools.llm_client import LLMClient
 
 
@@ -38,12 +39,15 @@ class StudyPlannerAgent:
 
         tasks = self._generate_tasks_with_llm(
             course_name=course_name,
+            difficulty=str(profile.get("difficulty") or "medium"),
             exam_date=exam_date,
             daily_hours=daily_hours,
             weak_topics=weak_topics,
             other_topics=other_topics,
+            progress=profile.get("progress") or "No recorded progress yet.",
             days_until_exam=days_until_exam,
             today=today,
+            language=language,
         )
         generation_mode = "llm" if tasks else "offline_template"
 
@@ -103,37 +107,37 @@ class StudyPlannerAgent:
         self,
         *,
         course_name: str,
+        difficulty: str,
         exam_date: date,
         daily_hours: float,
         weak_topics: list[str],
         other_topics: list[str],
+        progress: Any,
         days_until_exam: int,
         today: date,
+        language: str,
     ) -> list[dict[str, Any]]:
         if not self.llm_client.is_available:
             return []
 
-        system_prompt = (
-            "You create practical exam study plans. Return only valid JSON with this shape: "
-            '{"tasks":[{"date":"YYYY-MM-DD","topic":"...","phase":"...",'
-            '"hours":2.0,"task":"...","checkpoint":false}]}. '
-            "Make tasks specific, varied, and personalized. Use exactly the requested number of tasks."
-        )
-        user_prompt = (
-            f"Course: {course_name}\n"
-            f"Today: {today.isoformat()}\n"
-            f"Exam date: {exam_date.isoformat()}\n"
-            f"Number of daily tasks: {days_until_exam}\n"
-            f"Available hours per day: {daily_hours}\n"
-            f"Weak topics: {', '.join(weak_topics) if weak_topics else 'none'}\n"
-            f"Other topics: {', '.join(other_topics) if other_topics else 'none'}\n\n"
-            "Use weak topics more often than regular topics. Include checkpoint quiz days and final review."
+        prompt = render_prompt(
+            "study_planning",
+            course_name=course_name,
+            difficulty=difficulty,
+            exam_deadline=exam_date.isoformat(),
+            daily_hours=daily_hours,
+            progress=(
+                f"Today: {today.isoformat()}; number of daily tasks: {days_until_exam}; "
+                f"other topics: {', '.join(other_topics) if other_topics else 'none'}; {progress}"
+            ),
+            weak_topics=", ".join(weak_topics) if weak_topics else "none",
+            language="Arabic" if language == "ar" else "English",
         )
 
         try:
             payload = self.llm_client.generate_json(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
+                system_prompt=prompt.system,
+                user_prompt=prompt.user,
                 temperature=0.4,
                 max_tokens=2000,
             )

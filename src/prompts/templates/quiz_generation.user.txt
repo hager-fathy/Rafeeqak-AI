@@ -1,0 +1,9 @@
+Course: {{course_name}}
+Language: {{language}}
+Topic: {{topic}}
+Difficulty: {{difficulty}}
+Question types: {{question_types}}
+Number of questions: {{number_of_questions}}
+
+Course context:
+{{context}}

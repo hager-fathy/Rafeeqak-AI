@@ -1,6 +1,6 @@
 # Smart Study Planner
 
-This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (multi-agent routing), phase 5 (course-material RAG), phase 6 (quiz generation and evaluation), and phase 7 (CAG and structured database query) of the Smart Study Planner Chatbot project.
+This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (multi-agent routing), phase 5 (course-material RAG), phase 6 (quiz generation and evaluation), phase 7 (CAG and structured database query), phase 8 (multi-course core), phase 9 (localization and UI polish), and phase 10 (prompt templates and LLM quality) of the Smart Study Planner Chatbot project.
 
 The enhanced roadmap in `project..md` now upgrades Rafeeqak toward a stronger multi-course study assistant where each course has its own materials, study plan, quizzes, flashcards, weak topics, progress, and chat history.
 
@@ -11,9 +11,10 @@ The enhanced roadmap in `project..md` now upgrades Rafeeqak toward a stronger mu
 - Phase 5: local text extraction, chunking, vector-store persistence, and grounded Course RAG answers
 - Phase 6: topic/RAG-grounded quiz generation, flashcards, scoring feedback, and weak-topic detection
 - Phase 7: semantic response cache plus structured progress, deadline, score, and weak-topic queries
-- Phase 8: planned multi-course core upgrade with global course selector and course-scoped data
-- Phase 9: planned full Arabic localization, RTL layout, and UI polish
-- Phase 10+: planned prompt templates, planner upgrades, dashboard analytics, flashcards, settings, and final demo hardening
+- Phase 8: multi-course core upgrade with global course selector, course management, and course-scoped data
+- Phase 9: full Arabic localization, RTL layout, and UI polish
+- Phase 10: reusable prompt templates for RAG answers, course Q&A, lecture summaries, quiz generation, progress feedback, and study planning
+- Phase 11+: planned planner upgrades, dashboard analytics, settings, and final demo hardening
 
 ## Quick Start
 
@@ -82,7 +83,7 @@ smart-study-planner/
   - Quiz
   - Progress Dashboard
   - Account (logout)
-- Session state for chat history, plans, quiz attempts, and uploads
+- Course-scoped session state for chat history, plans, route traces, quiz attempts, and uploads
 - Local file upload storage in `data/uploads`
 - Supabase memory sync for:
   - student profile (per logged-in user)
@@ -109,15 +110,22 @@ smart-study-planner/
   - repeated chat questions are reused from `data/cache/semantic_cache.json` when the session context is unchanged
   - progress, deadline, score, and weak-topic questions route to the Database Query Agent
   - structured answers use the active local session first and Supabase memory snapshots when available
+- Phase 8 multi-course flow:
+  - global course selector plus course creation, rename, and delete controls
+  - materials, plans, quizzes, weak topics, progress summaries, route traces, and chat history stay separated per course
+  - deleting a course removes its local uploads and indexed RAG chunks
+- Phase 9 localization flow:
+  - English/Arabic language toggle with session and profile persistence
+  - Arabic UI strings and assistant responses
+  - RTL layout and Arabic-friendly typography when Arabic is selected
+- Phase 10 prompt flow:
+  - prompt templates live in `src/prompts/templates`
+  - RAG answers, quiz generation, and study planning render prompts through a shared prompt registry
+  - templates also cover course Q&A, lecture summaries, and progress feedback for planned agent upgrades
 
 ## Next Phases
 
 Upcoming phases should focus on:
 
-- Full multi-course separation for materials, plans, quizzes, flashcards, weak topics, progress, and chat history
-- Global course selector before chat, uploads, quiz, dashboard, and planning
-- Full Arabic localization with RTL layout and language toggle
-- Reusable prompt templates for RAG, quizzes, summaries, progress feedback, and planning
-- Course-scoped RAG retrieval with clearer citations
 - Better quiz types, partial text scoring, and stronger personalized feedback
 - Per-course dashboard analytics and settings page

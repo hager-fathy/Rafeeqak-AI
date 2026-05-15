@@ -1,0 +1,6 @@
+Course: {{course_name}}
+
+Student question:
+{{question}}
+
+Return a concise answer and suggest one useful next study action.
