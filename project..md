@@ -456,8 +456,8 @@ Legend:
 - [x] Search only inside selected-course materials.
 - [x] Improve chunking, ranking, and citation format.
 - [x] Citations must include course name, file name, and page/chunk reference.
-- [ ] Detect vague RAG queries such as "explain" or "اشرح" and ask for clarification before retrieval.
-- [ ] Prevent raw chunk dumping and deduplicate repeated chunks/sources.
+- [x] Detect vague RAG queries such as "explain" or "اشرح" and ask for clarification before retrieval.
+- [x] Prevent raw chunk dumping and deduplicate repeated chunks/sources.
 
 ### Phase 6 - Quiz And Evaluation
 
@@ -472,7 +472,7 @@ Legend:
 - [x] Reduce repeated questions per course by tracking previously generated questions.
 - [x] Add partial scoring for text answers.
 - [x] Add more detailed feedback and personalized recommendations.
-- [ ] Add clear quiz loading, generated, failed, and retry states in the UI.
+- [x] Add clear quiz loading, generated, failed, and retry states in the UI.
 
 ### Phase 7 - CAG And Structured Database Query
 
@@ -480,8 +480,8 @@ Legend:
 - [x] Add structured query handler for progress, deadlines, scores, and weak topics.
 - [x] Make cache context fingerprints course-aware.
 - [x] Make structured queries return selected-course and all-course summaries.
-- [ ] Invalidate cache when course, language, materials, quiz attempts, weak topics, progress, or planning inputs change.
-- [ ] Do not cache state-changing actions such as quiz generation, plan creation, answer submission, or settings updates.
+- [x] Invalidate cache when course, language, materials, quiz attempts, weak topics, progress, or planning inputs change.
+- [x] Do not cache state-changing actions such as quiz generation, plan creation, answer submission, or settings updates.
 
 ### Phase 8 - Multi-Course Core Upgrade
 
@@ -538,9 +538,9 @@ Legend:
 - [ ] Add tests for course selector gating.
 - [ ] Add tests for Arabic localization and RTL.
 - [ ] Add tests for course-scoped RAG retrieval.
-- [ ] Add tests for vague RAG query clarification and no raw chunk dumping.
+- [x] Add tests for vague RAG query clarification and no raw chunk dumping.
 - [ ] Add tests for quiz question types and partial scoring.
-- [ ] Add tests for quiz loading/failure/retry states.
+- [x] Add tests for quiz loading/failure/retry states.
 - [ ] Add tests for chat/session summary quality.
 - [ ] Add tests for reminder creation.
 - [ ] Prepare final demo script.
@@ -582,10 +582,10 @@ Legend:
 | Multiple quiz question types | Complete |
 | Partial scoring for text answers | Complete |
 | Better chat/session summaries | Pending |
-| Vague RAG query clarification and no raw chunk dumping | Pending |
+| Vague RAG query clarification and no raw chunk dumping | Complete |
 | Study planner input collection | Pending |
 | Weak-topic-first planning | Pending |
-| Quiz loading/failure/retry states | Pending |
+| Quiz loading/failure/retry states | Complete |
 | Notifications/reminders | Pending |
 | Settings page | Pending |
 | Per-course dashboard summaries | Pending |

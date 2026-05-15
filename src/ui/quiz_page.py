@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +115,13 @@ def render_quiz_page(project_root: Path) -> None:
                 border=True,
             )
 
+    status_before_generation = _quiz_generation_status(current_context.get("quiz_generation_status"))
+    retry_request = None
+    if _can_retry_quiz_generation(status_before_generation):
+        if st.button(t("quiz.retry", language), use_container_width=False, disabled=active_course is None):
+            retry_request = _retry_quiz_generation_request(status_before_generation)
+
+    generation_request = None
     if create_quiz:
         topic = " ".join(topic.split())
         if not topic:
@@ -124,36 +132,77 @@ def render_quiz_page(project_root: Path) -> None:
             quiz_language = detect_language(topic)
             if quiz_language != "ar":
                 quiz_language = language
-            generation_result = generate_quiz_from_course_materials(
-                indexer=indexer,
-                quiz_generator=quiz_generator,
+            generation_request = _quiz_generation_request(
                 topic=topic,
-                count=question_count,
+                count=int(question_count),
                 language=quiz_language,
                 difficulty=difficulty,
                 question_types=question_types,
-                previous_questions=current_context.get("generated_questions", []),
                 course_id=course_id,
                 course_name=course_name,
             )
-            if not generation_result["ok"]:
-                update_active_course_bucket(current_quiz=None, last_quiz_feedback=None)
-                st.warning(t(f"quiz.{generation_result['reason']}", language))
-                return
+    elif retry_request:
+        generation_request = retry_request
 
-            quiz_result = generation_result["quiz_result"]
-            context_chunks = generation_result["context_chunks"]
-            generated_quiz_for_render = quiz_result["quiz"]
-            generated_questions = current_context.get("generated_questions", [])
-            generated_questions.extend(question["question"] for question in quiz_result["questions"])
+    if generation_request:
+        update_active_course_bucket(
+            quiz_generation_status=_quiz_generation_status_payload("loading", request=generation_request)
+        )
+        with st.spinner(t("quiz.loading", language, topic=generation_request["topic"])):
+            try:
+                generation_result = generate_quiz_from_course_materials(
+                    indexer=indexer,
+                    quiz_generator=quiz_generator,
+                    topic=generation_request["topic"],
+                    count=generation_request["count"],
+                    language=generation_request["language"],
+                    difficulty=generation_request["difficulty"],
+                    question_types=generation_request["question_types"],
+                    previous_questions=current_context.get("generated_questions", []),
+                    course_id=generation_request["course_id"],
+                    course_name=generation_request["course_name"],
+                )
+            except Exception:
+                generation_result = {
+                    "ok": False,
+                    "reason": "generation_failed",
+                    "stats": indexer.stats(course_id=generation_request["course_id"]),
+                }
+
+        if not generation_result["ok"]:
             update_active_course_bucket(
-                current_quiz=generated_quiz_for_render,
+                current_quiz=None,
                 last_quiz_feedback=None,
-                generated_questions=generated_questions[-120:],
+                quiz_generation_status=_quiz_generation_status_payload(
+                    "failed",
+                    request=generation_request,
+                    reason=generation_result["reason"],
+                    stats=generation_result.get("stats"),
+                ),
             )
             touch_activity()
-            source_note = t("quiz.source_note", language, count=len(context_chunks)) if context_chunks else ""
-            st.success(t("quiz.generated", language, source_note=source_note))
+            _render_quiz_generation_status(course_context().get("quiz_generation_status"), language)
+            return
+
+        quiz_result = generation_result["quiz_result"]
+        context_chunks = generation_result["context_chunks"]
+        generated_quiz_for_render = quiz_result["quiz"]
+        generated_questions = current_context.get("generated_questions", [])
+        generated_questions.extend(question["question"] for question in quiz_result["questions"])
+        update_active_course_bucket(
+            current_quiz=generated_quiz_for_render,
+            last_quiz_feedback=None,
+            generated_questions=generated_questions[-120:],
+            quiz_generation_status=_quiz_generation_status_payload(
+                "generated",
+                request=generation_request,
+                source_count=len(context_chunks),
+                question_count=len(quiz_result["questions"]),
+            ),
+        )
+        touch_activity()
+
+    _render_quiz_generation_status(course_context().get("quiz_generation_status"), language)
 
     quiz = _current_quiz(fallback=generated_quiz_for_render)
     if not quiz:
@@ -331,6 +380,136 @@ def _current_quiz(*, fallback: dict[str, Any] | None = None) -> dict[str, Any] |
     if isinstance(quiz, list):
         return {"topic": "Legacy quiz", "language": "en", "questions": quiz, "flashcards": [], "source_count": 0}
     return quiz if isinstance(quiz, dict) else fallback
+
+
+def _quiz_generation_request(
+    *,
+    topic: str,
+    count: int,
+    language: str,
+    difficulty: str,
+    question_types: list[str],
+    course_id: str | None,
+    course_name: str | None,
+) -> dict[str, Any]:
+    return {
+        "topic": topic,
+        "count": int(count),
+        "language": language,
+        "difficulty": difficulty,
+        "question_types": list(question_types),
+        "course_id": course_id,
+        "course_name": course_name,
+    }
+
+
+def _quiz_generation_status(status: Any) -> dict[str, Any] | None:
+    if not isinstance(status, dict):
+        return None
+    status_name = str(status.get("status") or "").strip().lower()
+    if status_name not in {"loading", "generated", "failed"}:
+        return None
+    request = status.get("request")
+    if not isinstance(request, dict):
+        return None
+    return {**status, "status": status_name, "request": request}
+
+
+def _quiz_generation_status_payload(
+    status: str,
+    *,
+    request: dict[str, Any],
+    reason: str | None = None,
+    stats: dict[str, Any] | None = None,
+    source_count: int | None = None,
+    question_count: int | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": status,
+        "request": {
+            "topic": request["topic"],
+            "count": int(request["count"]),
+            "language": request["language"],
+            "difficulty": request["difficulty"],
+            "question_types": list(request["question_types"]),
+            "course_id": request.get("course_id"),
+            "course_name": request.get("course_name"),
+        },
+        "updated_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
+    }
+    if reason:
+        payload["reason"] = reason
+    if stats:
+        payload["stats"] = stats
+    if source_count is not None:
+        payload["source_count"] = source_count
+    if question_count is not None:
+        payload["question_count"] = question_count
+    return payload
+
+
+def _can_retry_quiz_generation(status: dict[str, Any] | None) -> bool:
+    return bool(status and status.get("status") == "failed" and _retry_quiz_generation_request(status))
+
+
+def _retry_quiz_generation_request(status: dict[str, Any] | None) -> dict[str, Any] | None:
+    status = _quiz_generation_status(status)
+    if not status or status["status"] != "failed":
+        return None
+    request = status["request"]
+    required = {"topic", "count", "language", "difficulty", "question_types"}
+    if any(not request.get(key) for key in required):
+        return None
+    try:
+        count = int(request["count"])
+    except (TypeError, ValueError):
+        return None
+    question_types = request.get("question_types")
+    if not isinstance(question_types, list):
+        return None
+    return _quiz_generation_request(
+        topic=str(request["topic"]),
+        count=count,
+        language=str(request["language"]),
+        difficulty=str(request["difficulty"]),
+        question_types=question_types,
+        course_id=request.get("course_id"),
+        course_name=request.get("course_name"),
+    )
+
+
+def _render_quiz_generation_status(status: Any, language: str) -> None:
+    status = _quiz_generation_status(status)
+    if not status:
+        return
+
+    request = status["request"]
+    status_name = status["status"]
+    topic = request.get("topic", "Revision")
+    if status_name == "loading":
+        st.info(t("quiz.status.loading", language, topic=topic))
+        return
+
+    if status_name == "generated":
+        source_count = int(status.get("source_count") or 0)
+        question_count = int(status.get("question_count") or request.get("count") or 0)
+        source_note = t("quiz.source_note", language, count=source_count) if source_count else ""
+        st.success(
+            t(
+                "quiz.status.generated",
+                language,
+                topic=topic,
+                count=question_count,
+                source_note=source_note,
+            )
+        )
+        return
+
+    reason = str(status.get("reason") or "generation_failed")
+    message = t(f"quiz.{reason}", language)
+    stats = status.get("stats") if isinstance(status.get("stats"), dict) else {}
+    chunk_count = stats.get("chunks", 0)
+    st.warning(t("quiz.status.failed", language, topic=topic, reason=message, chunks=chunk_count))
 
 
 def generate_quiz_from_course_materials(

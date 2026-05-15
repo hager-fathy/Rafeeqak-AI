@@ -177,7 +177,7 @@ class CourseRAGAgent:
             "status": "answered",
             "response": response,
             "question": question,
-            "citations": [self._source_label(match) for match in matches],
+            "citations": [self._source_label(match, course_name=course_name) for match in matches],
             "matches": [
                 {
                     "source_name": match.source_name,
@@ -185,7 +185,7 @@ class CourseRAGAgent:
                     "chunk_index": match.chunk_index,
                     "score": match.score,
                     "text": match.text,
-                    "citation": self._source_label(match),
+                    "citation": self._source_label(match, course_name=course_name),
                 }
                 for match in matches
             ],
@@ -210,9 +210,14 @@ class CourseRAGAgent:
             course_name=course_name,
         )
         if llm_answer:
-            return self._with_sources(llm_answer, matches, language), "llm"
+            return self._with_sources(llm_answer, matches, language, course_name=course_name), "llm"
 
-        return self._compose_offline_answer(question, matches, language=language), "offline_template"
+        return self._compose_offline_answer(
+            question,
+            matches,
+            language=language,
+            course_name=course_name,
+        ), "offline_template"
 
     def _no_materials_response(self, language: str) -> str:
         return t("rag.no_materials", language)
@@ -254,7 +259,14 @@ class CourseRAGAgent:
         trimmed = compact[:max_length].rsplit(" ", 1)[0].rstrip(" ,;:")
         return f"{trimmed}..."
 
-    def _compose_offline_answer(self, question: str, matches: list[RetrievedChunk], *, language: str) -> str:
+    def _compose_offline_answer(
+        self,
+        question: str,
+        matches: list[RetrievedChunk],
+        *,
+        language: str,
+        course_name: str | None,
+    ) -> str:
         topic = self._infer_topic(question, language=language)
         points = self._salient_points(question, matches, language=language)
 
@@ -284,7 +296,7 @@ class CourseRAGAgent:
         for point in points:
             answer_lines.append(f"- {self._educational_point(point, language=language)}")
 
-        return self._with_sources("\n".join(answer_lines), matches, language)
+        return self._with_sources("\n".join(answer_lines), matches, language, course_name=course_name)
 
     def _compose_llm_answer(
         self,
@@ -300,7 +312,8 @@ class CourseRAGAgent:
         source_blocks = []
         for index, match in enumerate(matches, start=1):
             source_blocks.append(
-                f"[{index}] {self._source_label(match)}\n{self._trim_to_sentence(match.text, max_length=900)}"
+                f"[{index}] {self._source_label(match, course_name=course_name)}\n"
+                f"{self._trim_to_sentence(match.text, max_length=900)}"
             )
         response_language = "Arabic" if language == "ar" else "English"
         joined_sources = "\n\n".join(source_blocks)
@@ -313,7 +326,7 @@ class CourseRAGAgent:
             ),
             question=question,
             context=joined_sources,
-            citations="\n".join(f"- {self._source_label(match)}" for match in matches),
+            citations="\n".join(f"- {self._source_label(match, course_name=course_name)}" for match in matches),
             language=response_language,
         )
         try:
@@ -346,26 +359,37 @@ class CourseRAGAgent:
         normalized_text = " ".join(str(match.text or "").casefold().split())
         return (source_name, section, normalized_text[:200])
 
-    def _format_sources(self, matches: list[RetrievedChunk], language: str) -> str:
+    def _format_sources(self, matches: list[RetrievedChunk], language: str, *, course_name: str | None = None) -> str:
         heading = "\u0627\u0644\u0645\u0635\u0627\u062f\u0631:" if language == "ar" else "Sources:"
         lines = [heading, ""]
         for match in matches:
-            lines.append(f"- {self._source_label(match)}")
+            lines.append(f"- {self._source_label(match, course_name=course_name)}")
         return "\n".join(lines)
 
-    def _source_label(self, match: RetrievedChunk) -> str:
+    def _source_label(self, match: RetrievedChunk, *, course_name: str | None = None) -> str:
+        resolved_course = " ".join(str(match.course_name or course_name or "").split())
         source_name = " ".join(str(match.source_name or "uploaded material").split())
         section = " ".join(str(match.section or "").split())
         chunk_index = getattr(match, "chunk_index", None) or 1
-        parts = [source_name]
+        parts = []
+        if resolved_course:
+            parts.append(resolved_course)
+        parts.append(source_name)
         if section:
             parts.append(section)
         parts.append(f"chunk {chunk_index}")
         return ", ".join(parts)
 
-    def _with_sources(self, answer: str, matches: list[RetrievedChunk], language: str) -> str:
+    def _with_sources(
+        self,
+        answer: str,
+        matches: list[RetrievedChunk],
+        language: str,
+        *,
+        course_name: str | None = None,
+    ) -> str:
         clean_answer = self._strip_sources(answer)
-        return f"{clean_answer}\n\n{self._format_sources(matches, language)}".strip()
+        return f"{clean_answer}\n\n{self._format_sources(matches, language, course_name=course_name)}".strip()
 
     def _strip_sources(self, answer: str) -> str:
         lines = str(answer or "").strip().splitlines()

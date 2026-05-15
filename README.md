@@ -105,11 +105,14 @@ smart-study-planner/
   - Chat questions about lectures, notes, PDFs, or explanations route to the Course RAG Agent
   - RAG answers include concise source citations from the retrieved chunks
 - Phase 6 quiz flow:
-  - Quiz Generator Agent creates MCQs and flashcards from a topic plus retrieved course chunks when available
-  - Progress Evaluator Agent scores submitted answers and returns per-question feedback
+  - Quiz Generator Agent creates MCQs, true/false, short-answer, matching questions, and flashcards from selected-course chunks
+  - Progress Evaluator Agent scores submitted answers, including partial credit for text and matching answers
+  - Quiz page shows loading, generated, failed, and retry states for course-material quiz generation
   - Low quiz scores are saved as weak-topic signals through the Memory Agent when Supabase is configured
 - Phase 7 CAG/database query flow:
-  - repeated chat questions are reused from `data/cache/semantic_cache.json` when the session context is unchanged
+  - repeated read-only chat questions are reused from `data/cache/semantic_cache.json` when the course context is unchanged
+  - cache fingerprints include course, language, materials, quiz attempts, weak topics, progress, planning inputs, and all-course summaries
+  - state-changing requests such as quiz generation, uploads, reminders, and plan-style actions skip cache lookup and storage
   - progress, deadline, score, and weak-topic questions route to the Database Query Agent
   - structured answers use the active local session first and Supabase memory snapshots when available
 - Phase 8 multi-course flow:

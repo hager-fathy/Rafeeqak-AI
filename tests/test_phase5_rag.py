@@ -209,6 +209,29 @@ def test_course_rag_agent_uses_llm_when_available(tmp_path) -> None:
     assert "- lecture.txt, text, chunk 1" in result["response"]
 
 
+def test_course_rag_agent_includes_course_name_in_citations_when_available(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    course_dir = uploads_dir / "ml-course"
+    course_dir.mkdir(parents=True)
+    course_dir.joinpath("lecture.txt").write_text(
+        "Backpropagation sends gradients backward through model layers.",
+        encoding="utf-8",
+    )
+
+    agent = CourseRAGAgent(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    result = agent.answer(
+        "Explain backpropagation from my notes",
+        course_id="ml-course",
+        course_name="Machine Learning",
+    )
+
+    assert result["ok"] is True
+    assert result["citations"] == ["Machine Learning, lecture.txt, text, chunk 1"]
+    assert "- Machine Learning, lecture.txt, text, chunk 1" in result["response"]
+    assert result["matches"][0]["citation"] == "Machine Learning, lecture.txt, text, chunk 1"
+
+
 def test_course_rag_agent_answers_arabic_questions_in_arabic(tmp_path) -> None:
     uploads_dir = tmp_path / "uploads"
     vector_store_dir = tmp_path / "vector_store"
@@ -276,11 +299,11 @@ def test_course_rag_agent_removes_duplicate_chunks_and_formats_unique_sources(tm
     assert duplicate_indexer.search_calls[0]["course_id"] == "soc"
     assert len(result["matches"]) == 2
     assert result["citations"] == [
-        "INE Introduction to SOC Course File.pdf, page 201, chunk 1",
-        "INE Introduction to SOC Course File.pdf, page 5, chunk 1",
+        "SOC, INE Introduction to SOC Course File.pdf, page 201, chunk 1",
+        "SOC, INE Introduction to SOC Course File.pdf, page 5, chunk 1",
     ]
-    assert result["response"].count("- INE Introduction to SOC Course File.pdf, page 201, chunk 1") == 1
-    assert result["response"].count("- INE Introduction to SOC Course File.pdf, page 5, chunk 1") == 1
+    assert result["response"].count("- SOC, INE Introduction to SOC Course File.pdf, page 201, chunk 1") == 1
+    assert result["response"].count("- SOC, INE Introduction to SOC Course File.pdf, page 5, chunk 1") == 1
 
 
 def test_course_rag_agent_synthesizes_specific_query_instead_of_dumping_chunks(tmp_path) -> None:

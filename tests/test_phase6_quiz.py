@@ -3,7 +3,16 @@ from src.agents.quiz_generator import QuizGeneratorAgent
 from src.agents.supervisor import SupervisorAgent
 from src.retrieval import CourseMaterialIndexer
 from src.tools.semantic_cache import SemanticResponseCache
-from src.ui.quiz_page import _current_quiz, generate_quiz_from_course_materials
+from src.tools.state import _normalize_course_bucket
+from src.ui.quiz_page import (
+    _can_retry_quiz_generation,
+    _current_quiz,
+    _quiz_generation_request,
+    _quiz_generation_status,
+    _quiz_generation_status_payload,
+    _retry_quiz_generation_request,
+    generate_quiz_from_course_materials,
+)
 
 
 class FakeQuizLLM:
@@ -245,6 +254,65 @@ def test_current_quiz_uses_fresh_generation_fallback() -> None:
     }
 
     assert _current_quiz(fallback=fallback) == fallback
+
+
+def test_quiz_generation_status_payload_supports_retry() -> None:
+    request = _quiz_generation_request(
+        topic="inverted indexes",
+        count=4,
+        language="en",
+        difficulty="medium",
+        question_types=["mcq", "short_answer"],
+        course_id="ir-1",
+        course_name="Information Retrieval",
+    )
+    failed_status = _quiz_generation_status_payload(
+        "failed",
+        request=request,
+        reason="material_match_required",
+        stats={"chunks": 3},
+    )
+
+    assert _quiz_generation_status(failed_status)["status"] == "failed"
+    assert _can_retry_quiz_generation(failed_status) is True
+    assert _retry_quiz_generation_request(failed_status) == request
+
+
+def test_quiz_generation_status_rejects_invalid_retry_payload() -> None:
+    invalid_status = {
+        "status": "failed",
+        "request": {
+            "topic": "inverted indexes",
+            "count": "not-a-number",
+            "language": "en",
+            "difficulty": "medium",
+            "question_types": ["mcq"],
+        },
+    }
+
+    assert _retry_quiz_generation_request(invalid_status) is None
+    assert _can_retry_quiz_generation(invalid_status) is False
+
+
+def test_course_bucket_preserves_quiz_generation_status() -> None:
+    status = _quiz_generation_status_payload(
+        "generated",
+        request=_quiz_generation_request(
+            topic="inverted indexes",
+            count=2,
+            language="en",
+            difficulty="easy",
+            question_types=["mcq"],
+            course_id="ir-1",
+            course_name="Information Retrieval",
+        ),
+        source_count=2,
+        question_count=2,
+    )
+
+    normalized = _normalize_course_bucket({"quiz_generation_status": status})
+
+    assert normalized["quiz_generation_status"] == status
 
 
 def test_progress_evaluator_scores_answers_and_flags_weak_topic() -> None:

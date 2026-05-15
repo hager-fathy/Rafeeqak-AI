@@ -154,7 +154,7 @@ class SupervisorAgent:
             }
 
         context_fingerprint = self._context_fingerprint(context)
-        cacheable = self._is_cacheable(selected_agent)
+        cacheable = self._is_cacheable(selected_agent, routed_input)
         if cacheable:
             cached_result = self.semantic_cache.lookup(
                 message=routed_input["message"],
@@ -590,25 +590,126 @@ class SupervisorAgent:
         tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
         quiz_attempts = context.get("quiz_attempts", []) or []
         uploads = context.get("uploads", []) or []
+        reminders = context.get("reminders", []) or []
+        weak_topics = active_plan.get("weak_topics", []) if isinstance(active_plan, dict) else []
         fingerprint_data = {
             "course": active_plan.get("course_name") if isinstance(active_plan, dict) else None,
             "active_course_id": context.get("active_course_id"),
             "active_course_name": context.get("active_course_name"),
             "language": normalize_language(context.get("selected_language")),
             "exam_date": active_plan.get("exam_date") if isinstance(active_plan, dict) else None,
-            "tasks": len(tasks),
-            "completed_tasks": sum(1 for task in tasks if task.get("completed")),
-            "weak_topics": active_plan.get("weak_topics", []) if isinstance(active_plan, dict) else [],
-            "quiz_attempts": len(quiz_attempts),
-            "last_quiz_time": quiz_attempts[-1].get("timestamp_utc") if quiz_attempts else None,
-            "uploads": len(uploads),
-            "reminders": len(context.get("reminders", []) or []),
+            "daily_hours": active_plan.get("daily_hours") if isinstance(active_plan, dict) else None,
+            "difficulty": active_plan.get("difficulty") if isinstance(active_plan, dict) else None,
+            "other_topics": active_plan.get("other_topics", []) if isinstance(active_plan, dict) else [],
+            "tasks": self._stable_digest(
+                [
+                    {
+                        "date": task.get("date"),
+                        "topic": task.get("topic"),
+                        "phase": task.get("phase"),
+                        "hours": task.get("hours"),
+                        "completed": bool(task.get("completed")),
+                        "checkpoint": bool(task.get("checkpoint")),
+                    }
+                    for task in tasks
+                    if isinstance(task, dict)
+                ]
+            ),
+            "weak_topics": self._stable_digest(sorted(str(topic) for topic in weak_topics)),
+            "quiz_attempts": self._stable_digest(
+                [
+                    {
+                        "timestamp_utc": attempt.get("timestamp_utc"),
+                        "topic": attempt.get("topic"),
+                        "difficulty": attempt.get("difficulty"),
+                        "score_percent": attempt.get("score_percent"),
+                        "question_types": attempt.get("question_types", []),
+                        "weak_topics": attempt.get("weak_topics", []),
+                        "points_earned": attempt.get("points_earned"),
+                        "total_points": attempt.get("total_points"),
+                    }
+                    for attempt in quiz_attempts
+                    if isinstance(attempt, dict)
+                ]
+            ),
+            "uploads": self._stable_digest(
+                [
+                    {
+                        "original_name": upload.get("original_name"),
+                        "stored_name": upload.get("stored_name"),
+                        "course_id": upload.get("course_id"),
+                        "course_name": upload.get("course_name"),
+                        "saved_at_utc": upload.get("saved_at_utc"),
+                    }
+                    for upload in uploads
+                    if isinstance(upload, dict)
+                ]
+            ),
+            "reminders": self._stable_digest(
+                [
+                    {
+                        "title": reminder.get("title"),
+                        "reminder_type": reminder.get("reminder_type"),
+                        "due_at": reminder.get("due_at"),
+                        "status": reminder.get("status"),
+                        "source": reminder.get("source"),
+                    }
+                    for reminder in reminders
+                    if isinstance(reminder, dict)
+                ]
+            ),
+            "all_courses": self._stable_digest(context.get("all_courses", []) or []),
         }
         encoded = json.dumps(fingerprint_data, sort_keys=True, default=str)
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
-    def _is_cacheable(self, selected_agent: str) -> bool:
-        return selected_agent not in {"quiz_generator_agent", "reminder_agent"}
+    def _stable_digest(self, value: Any) -> str:
+        encoded = json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+    def _is_cacheable(self, selected_agent: str, routed_input: dict[str, Any] | None = None) -> bool:
+        routed_input = routed_input or {}
+        if selected_agent in {
+            "quiz_generator_agent",
+            "reminder_agent",
+            "memory_agent",
+            "study_planner_agent",
+        }:
+            return False
+        if routed_input.get("intent") in {"quiz", "upload", "reminder", "memory"}:
+            return False
+        return not self._looks_state_changing_message(str(routed_input.get("message") or ""))
+
+    def _looks_state_changing_message(self, message: str) -> bool:
+        lowered = message.casefold()
+        state_changing_terms = {
+            "add",
+            "change",
+            "create",
+            "delete",
+            "generate",
+            "make",
+            "new",
+            "remove",
+            "retry",
+            "save",
+            "set",
+            "submit",
+            "update",
+            "upload",
+            "أنشئ",
+            "انشئ",
+            "احذف",
+            "ارفع",
+            "اضف",
+            "أضف",
+            "حدث",
+            "غيّر",
+            "غير",
+            "سجل",
+            "احفظ",
+        }
+        return any(term in lowered for term in state_changing_terms)
 
     def _trace_step(
         self,

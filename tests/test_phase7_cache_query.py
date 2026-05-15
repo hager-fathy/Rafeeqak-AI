@@ -130,3 +130,90 @@ def test_supervisor_routes_database_query_and_cache_hit(tmp_path) -> None:
     assert second["agent"] == "database_query_agent"
     assert second["payload"]["cache"]["hit"] is True
     assert [step["status"] for step in second["trace"] if step["agent"] == "SemanticCache"] == ["hit"]
+
+
+def test_supervisor_cache_invalidates_when_quiz_attempt_content_changes(tmp_path) -> None:
+    cache = SemanticResponseCache(cache_path=tmp_path / "semantic_cache.json", min_similarity=0.9)
+    supervisor = SupervisorAgent(semantic_cache=cache)
+    base_context = {
+        "active_course_id": "db",
+        "active_course_name": "Databases",
+        "active_plan": _active_plan(),
+        "uploads": [],
+    }
+    first_context = {
+        **base_context,
+        "quiz_attempts": [
+            {
+                "timestamp_utc": "2026-05-01T10:00:00",
+                "topic": "Indexes",
+                "score_percent": 60,
+                "weak_topics": ["Indexes"],
+            }
+        ],
+    }
+    updated_context = {
+        **base_context,
+        "quiz_attempts": [
+            {
+                "timestamp_utc": "2026-05-01T10:00:00",
+                "topic": "Indexes",
+                "score_percent": 90,
+                "weak_topics": [],
+            }
+        ],
+    }
+
+    first = supervisor.handle_message("What are my average scores?", context=first_context)
+    second = supervisor.handle_message("What are my average scores?", context=updated_context)
+
+    assert "60%" in first["response"]
+    assert "90%" in second["response"]
+    assert [step["status"] for step in second["trace"] if step["agent"] == "SemanticCache"] == ["miss"]
+
+
+def test_supervisor_cache_invalidates_when_material_metadata_changes(tmp_path) -> None:
+    cache = SemanticResponseCache(cache_path=tmp_path / "semantic_cache.json", min_similarity=0.9)
+    supervisor = SupervisorAgent(semantic_cache=cache)
+    base_context = {
+        "active_course_id": "db",
+        "active_course_name": "Databases",
+        "active_plan": _active_plan(),
+        "quiz_attempts": [],
+    }
+    first_context = {
+        **base_context,
+        "uploads": [
+            {
+                "original_name": "week1.txt",
+                "stored_name": "20260501_week1.txt",
+                "saved_at_utc": "2026-05-01T10:00:00",
+            }
+        ],
+    }
+    updated_context = {
+        **base_context,
+        "uploads": [
+            {
+                "original_name": "week2.txt",
+                "stored_name": "20260502_week2.txt",
+                "saved_at_utc": "2026-05-02T10:00:00",
+            }
+        ],
+    }
+
+    supervisor.handle_message("What is my progress?", context=first_context)
+    second = supervisor.handle_message("What is my progress?", context=updated_context)
+
+    assert [step["status"] for step in second["trace"] if step["agent"] == "SemanticCache"] == ["miss"]
+
+
+def test_supervisor_skips_cache_for_state_changing_requests(tmp_path) -> None:
+    cache = SemanticResponseCache(cache_path=tmp_path / "semantic_cache.json", min_similarity=0.9)
+    supervisor = SupervisorAgent(semantic_cache=cache)
+
+    result = supervisor.handle_message("Quiz me on gradient descent", context={"quiz_attempts": [], "uploads": []})
+
+    assert result["agent"] == "quiz_generator_agent"
+    assert [step["status"] for step in result["trace"] if step["agent"] == "SemanticCache"] == ["skipped"]
+    assert cache.stats()["entries"] == 0
