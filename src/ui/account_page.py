@@ -29,7 +29,7 @@ def render_account_page(project_root: Path) -> None:
         st.markdown("#### Session details")
         st.write(f"Signed in as: `{email}`")
 
-        if st.button("Logout", type="primary", width="stretch"):
+        if st.button("Logout", type="primary", use_container_width=True):
             result = AuthService().sign_out()
             clear_authenticated_user()
             if result["ok"]:

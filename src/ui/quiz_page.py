@@ -90,7 +90,7 @@ def render_quiz_page(project_root: Path) -> None:
                     step=1,
                     format="%d",
                 )
-                create_quiz = st.form_submit_button("Create quiz", width="stretch", disabled=active_course is None)
+                create_quiz = st.form_submit_button("Create quiz", use_container_width=True, disabled=active_course is None)
 
     with history_col:
         with st.container(border=True):
@@ -160,7 +160,7 @@ def render_quiz_page(project_root: Path) -> None:
             for idx, item in enumerate(questions):
                 answers.append(_render_question_input(idx, item))
 
-            submit_answers = st.form_submit_button("Submit answers", width="stretch")
+            submit_answers = st.form_submit_button("Submit answers", use_container_width=True)
 
     if submit_answers:
         evaluation = evaluator.evaluate(
@@ -300,7 +300,7 @@ def _render_attempt_history(attempts: list[dict[str, Any]]) -> None:
     if attempts:
         st.markdown("### Attempt history")
         history_df = pd.DataFrame(attempts)
-        st.dataframe(history_df, width="stretch", hide_index=True)
+        st.dataframe(history_df, use_container_width=True, hide_index=True)
 
 
 def _current_quiz() -> dict[str, Any] | None:

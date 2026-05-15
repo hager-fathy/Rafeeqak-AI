@@ -57,8 +57,8 @@ def render_dashboard_page(project_root: Path) -> None:
     st.markdown("### Quiz Trend")
     if quiz_attempts:
         quiz_df = pd.DataFrame(quiz_attempts)
-        st.line_chart(quiz_df["score_percent"], width="stretch")
-        st.dataframe(quiz_df, width="stretch", hide_index=True)
+        st.line_chart(quiz_df["score_percent"], use_container_width=True)
+        st.dataframe(quiz_df, use_container_width=True, hide_index=True)
     else:
         st.info("No quiz attempts yet.")
 
@@ -67,10 +67,10 @@ def render_dashboard_page(project_root: Path) -> None:
     if active_plan:
         plan_df = pd.DataFrame(active_plan["tasks"])
         topic_hours = plan_df.groupby("topic", as_index=False)["hours"].sum()
-        st.bar_chart(topic_hours.set_index("topic"), width="stretch")
+        st.bar_chart(topic_hours.set_index("topic"), use_container_width=True)
         st.dataframe(
             topic_hours.sort_values(by="hours", ascending=False),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             column_config={
                 "topic": st.column_config.TextColumn("Topic", width="large"),
@@ -95,7 +95,7 @@ def render_dashboard_page(project_root: Path) -> None:
                 st.markdown("#### Weak topics (Top 10)")
                 weak_topics = snapshot.get("weak_topics", [])
                 if weak_topics:
-                    st.dataframe(pd.DataFrame(weak_topics), hide_index=True, width="stretch")
+                    st.dataframe(pd.DataFrame(weak_topics), hide_index=True, use_container_width=True)
                 else:
                     st.info("No weak topics stored yet.")
 
@@ -117,4 +117,4 @@ def render_dashboard_page(project_root: Path) -> None:
                             "action": step["action"],
                         }
                     )
-            st.dataframe(pd.DataFrame(trace_rows), width="stretch", hide_index=True)
+            st.dataframe(pd.DataFrame(trace_rows), use_container_width=True, hide_index=True)

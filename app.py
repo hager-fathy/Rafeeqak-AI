@@ -131,7 +131,6 @@ def main() -> None:
             selection_mode="single",
             label_visibility="collapsed",
             key="top_nav_selector",
-            width="stretch",
         )
         if selected_page is None:
             selected_page = st.session_state.selected_page
@@ -168,7 +167,7 @@ def main() -> None:
                     placeholder="New course name",
                     label_visibility="collapsed",
                 )
-                submitted = st.form_submit_button("Add course", width="stretch")
+                submitted = st.form_submit_button("Add course", use_container_width=True)
                 if submitted:
                     course = add_course(course_name)
                     if course is None:

@@ -82,10 +82,9 @@ def render_chat_page(project_root: Path) -> None:
             selection_mode="single",
             default=None,
             label_visibility="collapsed",
-            width="stretch",
         )
 
-        if st.button("Use selected prompt", width="stretch", disabled=quick_prompt is None or active_course is None):
+        if st.button("Use selected prompt", use_container_width=True, disabled=quick_prompt is None or active_course is None):
             chat_history.append({"role": "user", "content": quick_prompt})
             chat_history.append({"role": "assistant", "content": _assistant_reply(quick_prompt)})
             update_active_course_bucket(chat_history=chat_history)
@@ -106,7 +105,7 @@ def render_chat_page(project_root: Path) -> None:
                 for step in route_traces[-1]:
                     st.caption(f"{step['agent']} | {step['step']} | {step['status']}")
                     st.write(step["action"])
-        if st.button("Clear chat history", width="stretch"):
+        if st.button("Clear chat history", use_container_width=True):
             update_active_course_bucket(chat_history=[])
             touch_activity()
             st.rerun()

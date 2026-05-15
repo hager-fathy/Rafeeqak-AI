@@ -29,7 +29,7 @@ def render_login_page(project_root: Path) -> None:
             with st.form("login_form"):
                 email = st.text_input("Email", placeholder="you@example.com")
                 password = st.text_input("Password", type="password")
-                submit = st.form_submit_button("Login", type="primary", width="stretch")
+                submit = st.form_submit_button("Login", type="primary", use_container_width=True)
 
             if submit:
                 if not email.strip() or not password:

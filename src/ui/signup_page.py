@@ -31,7 +31,7 @@ def render_signup_page(project_root: Path) -> None:
                 email = st.text_input("Email", placeholder="you@example.com")
                 password = st.text_input("Password", type="password")
                 confirm_password = st.text_input("Confirm password", type="password")
-                submit = st.form_submit_button("Create account", type="primary", width="stretch")
+                submit = st.form_submit_button("Create account", type="primary", use_container_width=True)
 
             if submit:
                 if not email.strip() or not password:

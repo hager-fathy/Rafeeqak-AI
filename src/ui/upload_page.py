@@ -58,7 +58,7 @@ def render_upload_page(project_root: Path) -> None:
                 disabled=active_course is None,
             )
 
-            if st.button("Save uploaded files", type="primary", width="stretch", disabled=active_course is None):
+            if st.button("Save uploaded files", type="primary", use_container_width=True, disabled=active_course is None):
                 if not files:
                     st.warning("Select at least one file first.")
                 else:
@@ -118,7 +118,7 @@ def render_upload_page(project_root: Path) -> None:
 
     st.dataframe(
         pd.DataFrame(table_rows),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         column_config={
             "file_name": st.column_config.TextColumn("File Name", width="large"),
@@ -136,7 +136,7 @@ def render_upload_page(project_root: Path) -> None:
         with size_col:
             st.caption(f"{round(stat.st_size / 1024, 2)} KB")
         with action_col:
-            if st.button("Delete", key=f"delete_upload_{file_path.name}", width="stretch"):
+            if st.button("Delete", key=f"delete_upload_{file_path.name}", use_container_width=True):
                 result = indexer.remove_file(file_path, course_id=course_id)
                 if result["ok"]:
                     uploads = [

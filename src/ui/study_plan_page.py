@@ -64,7 +64,7 @@ def render_study_plan_page(project_root: Path) -> None:
                     "Other topics (comma-separated)",
                     placeholder="Example: Linear Regression, Decision Trees",
                 )
-                submit_plan = st.form_submit_button("Generate study plan", width="stretch")
+                submit_plan = st.form_submit_button("Generate study plan", use_container_width=True)
 
     with summary_col:
         with st.container(border=True):
@@ -125,7 +125,7 @@ def render_study_plan_page(project_root: Path) -> None:
     st.markdown("### Current plan timeline")
     st.dataframe(
         tasks_df,
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         column_config={
             "date": st.column_config.TextColumn("Study Date", width="small"),
