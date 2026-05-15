@@ -12,10 +12,10 @@ class InputRouterAgent:
     }
 
     ARABIC_KEYWORDS = {
-        "quiz": ["اختبار", "اسئلة", "أسئلة", "كويز"],
-        "course_material": ["ملف", "محاضرة", "ملاحظات", "شرح"],
-        "memory": ["تذكر", "ذاكرة", "تقدمي", "درجات"],
-        "study_plan": ["خطة", "جدول", "اذاكر", "أذاكر", "مراجعة", "امتحان"],
+        "quiz": ["اختبار", "اسئلة", "أسئلة", "كويز", "تدريب", "فلاش كارد"],
+        "course_material": ["ملف", "محاضرة", "ملاحظات", "شرح", "المادة", "ملخص", "pdf"],
+        "memory": ["تذكر", "ذاكرة", "تقدمي", "درجات", "نقاط ضعفي", "ضعفي"],
+        "study_plan": ["خطة", "جدول", "اذاكر", "أذاكر", "مراجعة", "امتحان", "اليوم", "بكرة"],
     }
 
     def route(self, user_message: str) -> dict:
@@ -33,14 +33,15 @@ class InputRouterAgent:
                     signals.append(keyword)
 
         intent = max(scores, key=scores.get)
-        if scores[intent] == 0:
+        intent_score = scores[intent]
+        if intent_score == 0:
             intent = "chat"
 
         return {
             "message": message,
             "intent": intent,
             "language": language,
-            "confidence": self._confidence(scores[intent]),
+            "confidence": self._confidence(intent_score),
             "signals": signals,
         }
 

@@ -177,13 +177,13 @@ Legend:
 
 ### Phase 5 — RAG System
 - [x] Upload course documents. Files can be saved through the Upload Materials page.
-- [ ] Extract text, chunk, and embed.
-- [ ] Store in vector database.
-- [ ] Implement Course RAG Agent. Partial: placeholder file exists, but retrieval is not implemented.
+- [x] Extract text, chunk, and embed.
+- [x] Store in vector database.
+- [x] Implement Course RAG Agent.
 
 ### Phase 6 — Quiz and Evaluation
-- [ ] Implement Quiz Generator Agent. Partial: the UI can create quizzes from a fixed local question bank, but the agent is still a placeholder.
-- [ ] Implement Progress Evaluator Agent. Partial: the UI scores submitted quiz answers, but the agent is still a placeholder.
+- [x] Implement Quiz Generator Agent.
+- [x] Implement Progress Evaluator Agent.
 - [x] Store quiz scores and update weak topics automatically.
 
 ### Phase 7 — CAG and Database Query

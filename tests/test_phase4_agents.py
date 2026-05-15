@@ -20,6 +20,15 @@ def test_input_router_detects_arabic_language() -> None:
     assert routed["language"] == "ar"
 
 
+def test_input_router_handles_general_chat_without_keyword_match() -> None:
+    routed = InputRouterAgent().route("hello")
+
+    assert routed["intent"] == "chat"
+    assert routed["language"] == "en"
+    assert routed["confidence"] == 0.35
+    assert routed["signals"] == []
+
+
 def test_study_planner_generates_weighted_plan() -> None:
     result = StudyPlannerAgent().generate(
         {
@@ -65,6 +74,36 @@ def test_supervisor_runs_traceable_study_plan_route() -> None:
         "StudyPlannerAgent",
         "ResponseAgent",
     ]
+
+
+def test_supervisor_replies_in_arabic_for_arabic_study_plan_request() -> None:
+    plan = StudyPlannerAgent().generate(
+        {
+            "course_name": "Machine Learning",
+            "exam_date": date.today() + timedelta(days=3),
+            "daily_hours": 2,
+            "weak_topics": ["Backpropagation"],
+            "other_topics": [],
+        }
+    )["plan"]
+
+    result = SupervisorAgent().handle_message(
+        "ماذا أذاكر اليوم؟",
+        context={"active_plan": plan, "uploads": [], "quiz_attempts": []},
+    )
+
+    assert result["language"] == "ar"
+    assert result["agent"] == "study_planner_agent"
+    assert "اليوم ركز" in result["response"]
+    assert "Backpropagation" in result["response"]
+
+
+def test_supervisor_replies_in_arabic_for_general_arabic_chat() -> None:
+    result = SupervisorAgent().handle_message("مرحبا")
+
+    assert result["language"] == "ar"
+    assert result["agent"] == "response_agent"
+    assert "أنا جاهز" in result["response"]
 
 
 def test_supervisor_creates_plan_and_skips_missing_memory() -> None:

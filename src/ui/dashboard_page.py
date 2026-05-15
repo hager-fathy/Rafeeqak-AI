@@ -3,16 +3,20 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from src.retrieval import CourseMaterialIndexer
 from src.tools.state import get_authenticated_user, get_memory_agent
 from src.ui.theme import render_page_hero
 
 
 def render_dashboard_page(project_root: Path) -> None:
-    del project_root
-
     study_plans = st.session_state.get("study_plans", [])
     quiz_attempts = st.session_state.get("quiz_attempts", [])
     uploads = st.session_state.get("uploads", [])
+    indexer = CourseMaterialIndexer(
+        uploads_dir=project_root / "data" / "uploads",
+        vector_store_dir=project_root / "data" / "vector_store",
+    )
+    retrieval_stats = indexer.stats()
     memory_status = get_memory_agent().status()
     auth_user = get_authenticated_user()
     student_email = auth_user.get("email") if auth_user else None
@@ -28,16 +32,18 @@ def render_dashboard_page(project_root: Path) -> None:
         chips=[
             f"Plans: {len(study_plans)}",
             f"Uploads: {len(uploads)}",
+            f"RAG chunks: {retrieval_stats['chunks']}",
             f"Quiz avg: {average_quiz}%",
         ],
         accent_chip="Insights",
     )
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Plans Created", len(study_plans), border=True)
     col2.metric("Quiz Attempts", len(quiz_attempts), border=True)
     col3.metric("Average Quiz Score", f"{average_quiz}%", border=True)
     col4.metric("Uploaded Files", len(uploads), border=True)
+    col5.metric("RAG Chunks", retrieval_stats["chunks"], border=True)
 
     st.caption("Supabase memory: connected" if memory_status["enabled"] else f"Supabase memory: {memory_status['reason']}")
 

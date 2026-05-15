@@ -52,6 +52,7 @@ class SupervisorAgent:
     ) -> dict[str, Any]:
         context = context or {}
         trace: list[dict[str, Any]] = []
+        message_language = "ar" if self.router._contains_arabic(user_message) else "en"
 
         safety_result = self.safety.check(user_message)
         trace.append(
@@ -65,9 +66,9 @@ class SupervisorAgent:
         )
         if not safety_result["safe"]:
             return {
-                "response": "I cannot help with requests that try to bypass the assistant rules.",
+                "response": self._safety_response(message_language),
                 "intent": "safety",
-                "language": "en",
+                "language": message_language,
                 "agent": "safety_agent",
                 "trace": trace,
                 "payload": safety_result,
@@ -209,12 +210,12 @@ class SupervisorAgent:
         if selected_agent == "study_planner_agent":
             return self._run_study_planner(routed_input=routed_input, context=context)
         if selected_agent == "quiz_generator_agent":
-            return self._run_quiz_generator(context=context)
+            return self._run_quiz_generator(routed_input=routed_input, context=context)
         if selected_agent == "course_rag_agent":
             return self._run_course_rag(routed_input=routed_input, context=context)
         if selected_agent == "memory_agent":
-            return self._run_memory_agent(memory_agent=memory_agent)
-        return self._run_response_agent(context=context)
+            return self._run_memory_agent(routed_input=routed_input, memory_agent=memory_agent)
+        return self._run_response_agent(routed_input=routed_input, context=context)
 
     def _run_study_planner(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         message = routed_input["message"].lower()
@@ -227,7 +228,7 @@ class SupervisorAgent:
             action = "recommended the next study task"
 
         return {
-            "response": planner_result["response"],
+            "response": self._study_planner_response(planner_result, active_plan, routed_input["language"]),
             "payload": planner_result,
             "trace_steps": [
                 self._trace_step(
@@ -240,30 +241,54 @@ class SupervisorAgent:
             ],
         }
 
-    def _run_quiz_generator(self, *, context: dict[str, Any]) -> dict[str, Any]:
+    def _run_quiz_generator(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         active_plan = context.get("active_plan")
-        topic = "your next weak topic"
+        fallback_topic = "your next weak topic"
         if active_plan and active_plan.get("weak_topics"):
-            topic = active_plan["weak_topics"][0]
-        quiz_result = self.quiz_generator.generate(topic=topic, count=5)
+            fallback_topic = active_plan["weak_topics"][0]
+        topic = self.quiz_generator.infer_topic(routed_input["message"], fallback=fallback_topic)
+        context_matches = self.course_rag.indexer.search(topic, top_k=3)
+        context_chunks = [
+            {
+                "source_name": match.source_name,
+                "section": match.section,
+                "text": match.text,
+                "score": match.score,
+            }
+            for match in context_matches
+        ]
+        quiz_result = self.quiz_generator.generate(
+            topic=topic,
+            count=5,
+            context_chunks=context_chunks,
+            language=routed_input["language"],
+        )
+        if routed_input["language"] == "ar":
+            response = f"جهزت لك اختبارا من {quiz_result['count']} أسئلة عن {topic}. افتح صفحة Quiz للإجابة عليه."
+        else:
+            response = f"I prepared a {quiz_result['count']}-question quiz on {topic}. Open the Quiz page to answer it."
         return {
-            "response": f"I routed this to the Quiz Generator Agent. Use the Quiz page to create a focused quiz on {topic}.",
+            "response": response,
             "payload": quiz_result,
             "trace_steps": [
-                self._trace_step("run_agent", "QuizGeneratorAgent", "prepared quiz recommendation", "completed", {"topic": topic})
+                self._trace_step(
+                    "run_agent",
+                    "QuizGeneratorAgent",
+                    "generated a focused quiz and flashcards",
+                    "completed",
+                    {
+                        "topic": topic,
+                        "questions": quiz_result["count"],
+                        "source_chunks": len(context_chunks),
+                    },
+                )
             ],
         }
 
     def _run_course_rag(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         uploads = context.get("uploads", [])
-        rag_result = self.course_rag.answer(routed_input["message"])
-        if uploads:
-            response = (
-                f"I routed this to the Course RAG Agent. I can see {len(uploads)} uploaded file(s), "
-                "but indexing and retrieval are Phase 5."
-            )
-        else:
-            response = "I routed this to the Course RAG Agent. Upload materials first so Phase 5 can index them."
+        rag_result = self.course_rag.answer(routed_input["message"], language=routed_input["language"])
+        response = rag_result["response"]
 
         return {
             "response": response,
@@ -272,14 +297,19 @@ class SupervisorAgent:
                 self._trace_step(
                     "run_agent",
                     "CourseRAGAgent",
-                    "checked course-material readiness",
-                    "pending_phase_5",
-                    {"uploaded_files": len(uploads)},
+                    "retrieved relevant course-material chunks",
+                    "completed" if rag_result["ok"] else rag_result["status"],
+                    {
+                        "uploaded_files": len(uploads),
+                        "indexed_files": rag_result["stats"]["files"],
+                        "indexed_chunks": rag_result["stats"]["chunks"],
+                        "citations": rag_result["citations"],
+                    },
                 )
             ],
         }
 
-    def _run_memory_agent(self, *, memory_agent: Any | None) -> dict[str, Any]:
+    def _run_memory_agent(self, *, routed_input: dict[str, Any], memory_agent: Any | None) -> dict[str, Any]:
         if memory_agent is None:
             status = {"enabled": False, "reason": "Memory agent was not provided."}
         else:
@@ -288,6 +318,10 @@ class SupervisorAgent:
         response = "Memory Agent is active and ready."
         if not status["enabled"]:
             response = f"Memory Agent is active locally, but cloud memory is not configured: {status['reason']}"
+        if routed_input["language"] == "ar":
+            response = "وكيل الذاكرة يعمل وجاهز."
+            if not status["enabled"]:
+                response = f"وكيل الذاكرة يعمل محليا، لكن الذاكرة السحابية غير مفعلة: {status['reason']}"
 
         return {
             "response": response,
@@ -297,11 +331,15 @@ class SupervisorAgent:
             ],
         }
 
-    def _run_response_agent(self, *, context: dict[str, Any]) -> dict[str, Any]:
+    def _run_response_agent(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         has_active_plan = context.get("active_plan") is not None
         response = "I can help with your active plan, quizzes, uploaded materials, or progress memory."
         if not has_active_plan:
             response = "I am ready to help with planning, revision, and quizzes. Ask me what to study next."
+        if routed_input["language"] == "ar":
+            response = "أقدر أساعدك في الخطة الحالية، الاختبارات، المواد المرفوعة، أو متابعة تقدمك."
+            if not has_active_plan:
+                response = "أنا جاهز أساعدك في التخطيط والمراجعة والاختبارات. اسألني ماذا تذاكر بعد ذلك."
         return {
             "response": response,
             "payload": {"has_active_plan": has_active_plan},
@@ -315,6 +353,36 @@ class SupervisorAgent:
                 )
             ],
         }
+
+    def _safety_response(self, language: str) -> str:
+        if language == "ar":
+            return "لا أستطيع المساعدة في طلبات تحاول تجاوز قواعد المساعد."
+        return "I cannot help with requests that try to bypass the assistant rules."
+
+    def _study_planner_response(
+        self,
+        planner_result: dict[str, Any],
+        active_plan: dict[str, Any] | None,
+        language: str,
+    ) -> str:
+        if language != "ar":
+            return planner_result["response"]
+        if not active_plan:
+            if planner_result["ok"]:
+                return "لا توجد خطة نشطة حاليا. افتح صفحة Study Plan وأنشئ خطة أولا."
+            if "prioritize" in planner_result["response"].lower():
+                return "أضف نقاط ضعفك في صفحة Study Plan، وبعدها أقدر أرتبها حسب الأولوية في جدولك."
+            return "لا توجد خطة دراسة بعد. افتح صفحة Study Plan وأنشئ خطة أولا."
+
+        task = planner_result.get("task")
+        if task:
+            checkpoint_note = " وتتضمن أيضا اختبارا قصيرا." if task.get("checkpoint") else ""
+            return f"اليوم ركز على {task['topic']} لمدة {task['hours']} ساعة. الهدف: ادرس الموضوع واكتب ملخصا قصيرا.{checkpoint_note}"
+
+        weak_topics = active_plan.get("weak_topics", [])
+        if weak_topics:
+            return f"خطتك الحالية تعطي نقاط الضعف فرصا إضافية قبل باقي الموضوعات. موضوعات الأولوية: {', '.join(weak_topics)}."
+        return "خطتك الحالية لا تحتوي على نقاط ضعف محددة، لذلك توزع المراجعة بالتساوي بين الموضوعات."
 
     def _trace_step(
         self,

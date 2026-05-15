@@ -1,75 +1,31 @@
-import random
-from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import streamlit as st
 
+from src.agents.progress_evaluator import ProgressEvaluatorAgent
+from src.agents.quiz_generator import QuizGeneratorAgent
+from src.retrieval import CourseMaterialIndexer
 from src.tools.state import get_authenticated_user, get_memory_agent, touch_activity
 from src.ui.theme import render_page_hero
 
-QUESTION_BANK = [
-    {
-        "question": "What does backpropagation compute in a neural network?",
-        "options": [
-            "The gradient of the loss with respect to each parameter",
-            "Only the forward pass outputs",
-            "The training data distribution",
-            "The number of hidden layers",
-        ],
-        "answer_index": 0,
-    },
-    {
-        "question": "Which parameter controls margin softness in a soft-margin SVM?",
-        "options": ["Alpha", "C", "Gamma", "Lambda"],
-        "answer_index": 1,
-    },
-    {
-        "question": "What is overfitting?",
-        "options": [
-            "Performing poorly on both train and test data",
-            "Performing well on training data but poorly on unseen data",
-            "Using too little data preprocessing",
-            "A type of optimizer",
-        ],
-        "answer_index": 1,
-    },
-    {
-        "question": "Why is a validation set used?",
-        "options": [
-            "To train the final model parameters",
-            "To choose model settings and monitor generalization",
-            "To replace test evaluation",
-            "To remove noisy samples only",
-        ],
-        "answer_index": 1,
-    },
-    {
-        "question": "What does the learning rate affect?",
-        "options": [
-            "How large each optimization step is",
-            "How many classes exist in data",
-            "The input feature count",
-            "The batch label quality",
-        ],
-        "answer_index": 0,
-    },
-]
-
-
-def _build_quiz(topic: str, question_count: int) -> list[dict]:
-    seed = f"{topic.strip().lower()}::{question_count}"
-    rng = random.Random(seed)
-    return rng.sample(QUESTION_BANK, k=min(question_count, len(QUESTION_BANK)))
-
 
 def render_quiz_page(project_root: Path) -> None:
-    del project_root
     memory_agent = get_memory_agent()
     memory_status = memory_agent.status()
     auth_user = get_authenticated_user()
     student_email = auth_user.get("email") if auth_user else None
     student_name = (auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None
+    active_plan = st.session_state.get("active_plan")
+    default_topic = _default_topic(active_plan)
+
+    indexer = CourseMaterialIndexer(
+        uploads_dir=project_root / "data" / "uploads",
+        vector_store_dir=project_root / "data" / "vector_store",
+    )
+    quiz_generator = QuizGeneratorAgent()
+    evaluator = ProgressEvaluatorAgent()
 
     attempts = st.session_state.get("quiz_attempts", [])
     average_score = round(sum(item["score_percent"] for item in attempts) / len(attempts), 1) if attempts else 0.0
@@ -80,6 +36,7 @@ def render_quiz_page(project_root: Path) -> None:
         chips=[
             f"Attempts: {len(attempts)}",
             f"Average score: {average_score}%",
+            f"RAG chunks: {indexer.stats()['chunks']}",
         ],
         accent_chip="Quiz lab",
     )
@@ -90,8 +47,8 @@ def render_quiz_page(project_root: Path) -> None:
         with st.container(border=True):
             st.markdown("#### Quiz setup")
             with st.form("quiz_config_form"):
-                topic = st.text_input("Topic", value="Backpropagation")
-                question_count = st.slider("Number of questions", min_value=2, max_value=5, value=3)
+                topic = st.text_input("Topic", value=default_topic)
+                question_count = st.slider("Number of questions", min_value=2, max_value=7, value=4)
                 create_quiz = st.form_submit_button("Create quiz", width="stretch")
 
     with history_col:
@@ -107,67 +64,169 @@ def render_quiz_page(project_root: Path) -> None:
             st.metric("Supabase memory", "Connected" if memory_status["enabled"] else "Not configured", border=True)
 
     if create_quiz:
-        st.session_state.current_quiz = _build_quiz(topic, question_count)
+        language = _detect_language(topic)
+        context_matches = indexer.search(topic, top_k=3)
+        context_chunks = [
+            {
+                "source_name": match.source_name,
+                "section": match.section,
+                "text": match.text,
+                "score": match.score,
+            }
+            for match in context_matches
+        ]
+        quiz_result = quiz_generator.generate(
+            topic=topic,
+            count=question_count,
+            context_chunks=context_chunks,
+            language=language,
+        )
+        st.session_state.current_quiz = quiz_result["quiz"]
+        st.session_state.last_quiz_feedback = None
         touch_activity()
-        st.success("Quiz generated.")
+        source_note = f" using {len(context_chunks)} retrieved source chunk(s)" if context_chunks else ""
+        st.success(f"Quiz generated{source_note}.")
 
-    quiz = st.session_state.get("current_quiz")
+    quiz = _current_quiz()
     if not quiz:
         st.info("No active quiz yet. Create one above.")
         return
+
+    questions = quiz.get("questions", [])
+    if not questions:
+        st.warning("The active quiz has no questions. Create a new quiz.")
+        return
+
+    st.markdown(f"### Active quiz: {quiz.get('topic', 'Revision')}")
+    st.caption(
+        "Generated from uploaded materials and study-topic templates."
+        if quiz.get("source_count")
+        else "Generated from study-topic templates."
+    )
 
     with st.container(border=True):
         st.markdown("#### Answer questions")
         with st.form("quiz_answers_form"):
             chosen_indices = []
-            for idx, item in enumerate(quiz):
+            for idx, item in enumerate(questions):
                 answer = st.radio(
                     f"Q{idx + 1}. {item['question']}",
                     options=list(range(len(item["options"]))),
                     format_func=lambda option_idx, opts=item["options"]: opts[option_idx],
-                    key=f"quiz_q_{idx}",
+                    key=f"quiz_q_{idx}_{item.get('id', idx)}",
                 )
                 chosen_indices.append(answer)
 
             submit_answers = st.form_submit_button("Submit answers", width="stretch")
 
     if submit_answers:
-        correct_answers = 0
-        for selected, item in zip(chosen_indices, quiz):
-            if selected == item["answer_index"]:
-                correct_answers += 1
-
-        total_questions = len(quiz)
-        score_percent = round((correct_answers / total_questions) * 100, 1)
-        st.session_state.quiz_attempts.append(
-            {
-                "timestamp_utc": datetime.utcnow().isoformat(timespec="seconds"),
-                "topic": topic,
-                "correct": correct_answers,
-                "total": total_questions,
-                "score_percent": score_percent,
-            }
+        evaluation = evaluator.evaluate(
+            questions=questions,
+            selected_indices=chosen_indices,
+            topic=quiz.get("topic", "Revision"),
+            language=quiz.get("language", "en"),
         )
-        touch_activity()
-
-        st.success(f"Score: {correct_answers}/{total_questions} ({score_percent}%).")
-        active_plan = st.session_state.get("active_plan")
-        active_course_name = active_plan.get("course_name") if active_plan else None
-        sync_result = memory_agent.record_quiz_attempt(
-            course_name=active_course_name,
-            topic=topic,
-            correct=correct_answers,
-            total=total_questions,
-            score_percent=score_percent,
-            student_email=student_email,
-            student_name=student_name,
-        )
-        if sync_result["ok"]:
-            st.info("Quiz attempt synced to Supabase memory.")
+        st.session_state.last_quiz_feedback = evaluation
+        if evaluation["ok"]:
+            _record_attempt(
+                evaluation=evaluation,
+                active_plan=active_plan,
+                memory_agent=memory_agent,
+                student_email=student_email,
+                student_name=student_name,
+            )
+            touch_activity()
+            st.success(evaluation["summary"])
+            st.info(evaluation["recommendation"])
         else:
-            st.warning(f"Quiz attempt saved locally only. Reason: {sync_result['reason']}")
+            st.warning(evaluation["message"])
 
-    if st.session_state.quiz_attempts:
+    _render_feedback(st.session_state.get("last_quiz_feedback"))
+    _render_flashcards(quiz.get("flashcards", []))
+    _render_attempt_history(st.session_state.get("quiz_attempts", []))
+
+
+def _record_attempt(
+    *,
+    evaluation: dict[str, Any],
+    active_plan: dict[str, Any] | None,
+    memory_agent: Any,
+    student_email: str | None,
+    student_name: str | None,
+) -> None:
+    st.session_state.quiz_attempts.append(
+        {
+            "timestamp_utc": evaluation["timestamp_utc"],
+            "topic": evaluation["topic"],
+            "correct": evaluation["correct"],
+            "total": evaluation["total"],
+            "score_percent": evaluation["score_percent"],
+            "weak_topics": [item["topic"] for item in evaluation["weak_topics"]],
+            "recommendation": evaluation["recommendation"],
+        }
+    )
+
+    active_course_name = active_plan.get("course_name") if active_plan else None
+    sync_result = memory_agent.record_quiz_attempt(
+        course_name=active_course_name,
+        topic=evaluation["topic"],
+        correct=evaluation["correct"],
+        total=evaluation["total"],
+        score_percent=evaluation["score_percent"],
+        student_email=student_email,
+        student_name=student_name,
+    )
+    if sync_result["ok"]:
+        st.info("Quiz attempt synced to Supabase memory.")
+    else:
+        st.warning(f"Quiz attempt saved locally only. Reason: {sync_result['reason']}")
+
+
+def _render_feedback(evaluation: dict[str, Any] | None) -> None:
+    if not evaluation or not evaluation.get("ok"):
+        return
+
+    with st.expander("Question feedback", expanded=True):
+        for index, item in enumerate(evaluation["feedback"], start=1):
+            status = "Correct" if item["is_correct"] else "Needs review"
+            st.markdown(f"**Q{index}. {status}**")
+            st.write(item["question"])
+            st.caption(f"Your answer: {item['selected_answer'] or 'No answer'}")
+            if not item["is_correct"]:
+                st.caption(f"Correct answer: {item['correct_answer']}")
+            if item["explanation"]:
+                st.info(item["explanation"])
+
+
+def _render_flashcards(flashcards: list[dict[str, str]]) -> None:
+    if not flashcards:
+        return
+
+    with st.expander("Flashcards from this quiz", expanded=False):
+        for card in flashcards:
+            st.markdown(f"**{card['front']}**")
+            st.write(card["back"])
+
+
+def _render_attempt_history(attempts: list[dict[str, Any]]) -> None:
+    if attempts:
         st.markdown("### Attempt history")
-        history_df = pd.DataFrame(st.session_state.quiz_attempts)
+        history_df = pd.DataFrame(attempts)
         st.dataframe(history_df, width="stretch", hide_index=True)
+
+
+def _current_quiz() -> dict[str, Any] | None:
+    quiz = st.session_state.get("current_quiz")
+    if isinstance(quiz, list):
+        return {"topic": "Legacy quiz", "language": "en", "questions": quiz, "flashcards": [], "source_count": 0}
+    return quiz if isinstance(quiz, dict) else None
+
+
+def _default_topic(active_plan: dict[str, Any] | None) -> str:
+    if active_plan and active_plan.get("weak_topics"):
+        return active_plan["weak_topics"][0]
+    return "Backpropagation"
+
+
+def _detect_language(text: str) -> str:
+    return "ar" if any("\u0600" <= char <= "\u06FF" for char in text) else "en"

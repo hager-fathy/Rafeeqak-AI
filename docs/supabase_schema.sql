@@ -121,3 +121,128 @@ drop trigger if exists trg_weak_topics_updated_at on public.weak_topics;
 create trigger trg_weak_topics_updated_at
 before update on public.weak_topics
 for each row execute function public.set_updated_at();
+
+alter table public.student_profiles enable row level security;
+alter table public.courses enable row level security;
+alter table public.exams enable row level security;
+alter table public.study_tasks enable row level security;
+alter table public.quiz_scores enable row level security;
+alter table public.weak_topics enable row level security;
+
+drop policy if exists "Students can manage own profile" on public.student_profiles;
+create policy "Students can manage own profile"
+on public.student_profiles
+for all
+to authenticated
+using (email = auth.jwt() ->> 'email')
+with check (email = auth.jwt() ->> 'email');
+
+drop policy if exists "Students can manage own courses" on public.courses;
+create policy "Students can manage own courses"
+on public.courses
+for all
+to authenticated
+using (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = courses.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+)
+with check (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = courses.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+);
+
+drop policy if exists "Students can manage own exams" on public.exams;
+create policy "Students can manage own exams"
+on public.exams
+for all
+to authenticated
+using (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = exams.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+)
+with check (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = exams.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+);
+
+drop policy if exists "Students can manage own study tasks" on public.study_tasks;
+create policy "Students can manage own study tasks"
+on public.study_tasks
+for all
+to authenticated
+using (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = study_tasks.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+)
+with check (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = study_tasks.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+);
+
+drop policy if exists "Students can manage own quiz scores" on public.quiz_scores;
+create policy "Students can manage own quiz scores"
+on public.quiz_scores
+for all
+to authenticated
+using (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = quiz_scores.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+)
+with check (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = quiz_scores.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+);
+
+drop policy if exists "Students can manage own weak topics" on public.weak_topics;
+create policy "Students can manage own weak topics"
+on public.weak_topics
+for all
+to authenticated
+using (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = weak_topics.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+)
+with check (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = weak_topics.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+);

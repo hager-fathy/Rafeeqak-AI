@@ -20,6 +20,11 @@ This creates:
 - `study_tasks`
 - `quiz_scores`
 - `weak_topics`
+- row-level security policies that allow each logged-in student to manage only their own rows
+
+If you created the tables before these policies were added and see an error like
+`new row violates row-level security policy for table "student_profiles"`, rerun the latest
+`docs/supabase_schema.sql` in the SQL Editor.
 
 ## 3. Configure environment
 

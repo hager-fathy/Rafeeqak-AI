@@ -18,6 +18,9 @@ def _assistant_reply(user_message: str) -> str:
         memory_agent=get_memory_agent(),
     )
     append_route_trace(result["trace"])
+    if result["agent"] == "quiz_generator_agent" and result.get("payload", {}).get("quiz"):
+        st.session_state.current_quiz = result["payload"]["quiz"]
+        st.session_state.last_quiz_feedback = None
     return result["response"]
 
 

@@ -1,11 +1,13 @@
 # Smart Study Planner
 
-This repository contains phase 1, phase 2, phase 3 (Supabase memory), and phase 4 (multi-agent routing) of the Smart Study Planner Chatbot project:
+This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (multi-agent routing), phase 5 (course-material RAG), and phase 6 (quiz generation and evaluation) of the Smart Study Planner Chatbot project:
 
 - Phase 1: project setup and base structure
 - Phase 2: Streamlit UI pages (chat, study plan, upload, quiz, dashboard)
 - Phase 3: persistent memory with Supabase schema and repository integration
 - Phase 4: input routing, supervisor orchestration, study planner agent, memory handoff, and route trace logging
+- Phase 5: local text extraction, chunking, vector-store persistence, and grounded Course RAG answers
+- Phase 6: topic/RAG-grounded quiz generation, flashcards, scoring feedback, and weak-topic detection
 
 ## Quick Start
 
@@ -88,10 +90,18 @@ smart-study-planner/
   - Study Planner Agent creates plans and recommends next tasks
   - Memory Agent syncs plans and quiz attempts when Supabase is configured
   - Route traces are saved in session state and shown in Chat/Dashboard
+- Phase 5 RAG flow:
+  - Upload Materials saves PDFs, DOCX, PPTX, Markdown, and text files
+  - Course materials are extracted, chunked, embedded into local sparse vectors, and stored in `data/vector_store/course_materials.json`
+  - Chat questions about lectures, notes, PDFs, or explanations route to the Course RAG Agent
+  - RAG answers include concise source citations from the retrieved chunks
+- Phase 6 quiz flow:
+  - Quiz Generator Agent creates MCQs and flashcards from a topic plus retrieved course chunks when available
+  - Progress Evaluator Agent scores submitted answers and returns per-question feedback
+  - Low quiz scores are saved as weak-topic signals through the Memory Agent when Supabase is configured
 
 ## Next Phases
 
 Upcoming phases can build on this scaffold by adding:
 
-- RAG indexing and retrieval
-- Quiz generation and automated evaluation
+- Semantic cache and structured database query tools

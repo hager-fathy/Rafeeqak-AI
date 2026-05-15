@@ -13,6 +13,7 @@ def init_state() -> None:
         "active_plan": None,
         "quiz_attempts": [],
         "current_quiz": None,
+        "last_quiz_feedback": None,
         "uploads": [],
         "last_activity_at": datetime.utcnow().isoformat(timespec="seconds"),
         "memory_sync_notice": None,
