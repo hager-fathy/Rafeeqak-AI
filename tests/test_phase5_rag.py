@@ -4,6 +4,13 @@ from src.retrieval import CourseMaterialIndexer
 from src.tools.semantic_cache import SemanticResponseCache
 
 
+class FakeTextLLM:
+    is_available = True
+
+    def generate_text(self, **kwargs) -> str:
+        return "LLM answer from notes.\n\nSources: lecture.txt (text)"
+
+
 def test_course_material_indexer_extracts_chunks_and_searches(tmp_path) -> None:
     uploads_dir = tmp_path / "uploads"
     vector_store_dir = tmp_path / "vector_store"
@@ -27,6 +34,29 @@ def test_course_material_indexer_extracts_chunks_and_searches(tmp_path) -> None:
     assert "Backpropagation" in matches[0].text
 
 
+def test_course_material_indexer_removes_deleted_file_and_chunks(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    uploads_dir.mkdir()
+    notes_path = uploads_dir / "ml_notes.txt"
+    notes_path.write_text(
+        "Backpropagation computes gradients by applying the chain rule.",
+        encoding="utf-8",
+    )
+
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    indexer.index_file(notes_path)
+
+    result = indexer.remove_file(notes_path)
+
+    assert result["ok"] is True
+    assert result["file_deleted"] is True
+    assert result["removed_chunks"] == 1
+    assert not notes_path.exists()
+    assert indexer.search("backpropagation") == []
+    assert indexer.stats()["chunks"] == 0
+
+
 def test_course_rag_agent_answers_with_citations(tmp_path) -> None:
     uploads_dir = tmp_path / "uploads"
     vector_store_dir = tmp_path / "vector_store"
@@ -43,6 +73,22 @@ def test_course_rag_agent_answers_with_citations(tmp_path) -> None:
     assert result["status"] == "answered"
     assert "Sources:" in result["response"]
     assert result["citations"] == ["lecture.txt (text)"]
+
+
+def test_course_rag_agent_uses_llm_when_available(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    uploads_dir.mkdir()
+    uploads_dir.joinpath("lecture.txt").write_text(
+        "Backpropagation sends gradients backward through model layers.",
+        encoding="utf-8",
+    )
+
+    agent = CourseRAGAgent(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir, llm_client=FakeTextLLM())
+    result = agent.answer("Explain backpropagation from my notes")
+
+    assert result["generation_mode"] == "llm"
+    assert result["response"].startswith("LLM answer")
 
 
 def test_course_rag_agent_answers_arabic_questions_in_arabic(tmp_path) -> None:

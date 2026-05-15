@@ -5,6 +5,8 @@ import re
 from datetime import datetime
 from typing import Any
 
+from src.tools.llm_client import LLMClient
+
 
 class QuizGeneratorAgent:
     """Generates deterministic topic quizzes and flashcards for revision."""
@@ -95,6 +97,9 @@ class QuizGeneratorAgent:
         },
     ]
 
+    def __init__(self, *, llm_client: LLMClient | None = None) -> None:
+        self.llm_client = llm_client or LLMClient()
+
     def generate(
         self,
         topic: str,
@@ -104,26 +109,39 @@ class QuizGeneratorAgent:
         language: str = "en",
     ) -> dict[str, Any]:
         clean_topic = self._clean_topic(topic)
-        question_count = min(max(int(count or 1), 1), 10)
+        question_count = max(int(count or 1), 1)
         context_chunks = context_chunks or []
         rng = random.Random(f"{clean_topic.lower()}::{question_count}::{language}")
 
-        questions = self._context_questions(
+        llm_quiz = self._generate_with_llm(
             topic=clean_topic,
+            count=question_count,
             context_chunks=context_chunks,
-            limit=question_count,
             language=language,
-            rng=rng,
         )
+        if llm_quiz:
+            questions = llm_quiz["questions"]
+            flashcards = llm_quiz["flashcards"]
+            generation_mode = "llm"
+        else:
+            questions = self._context_questions(
+                topic=clean_topic,
+                context_chunks=context_chunks,
+                limit=question_count,
+                language=language,
+                rng=rng,
+            )
 
-        templates = self.GENERIC_ARABIC_TEMPLATES if language == "ar" else self.GENERIC_ENGLISH_TEMPLATES
-        template_index = 0
-        while len(questions) < question_count:
-            template = templates[template_index % len(templates)]
-            questions.append(self._template_question(template, clean_topic, len(questions) + 1, rng))
-            template_index += 1
+            templates = self.GENERIC_ARABIC_TEMPLATES if language == "ar" else self.GENERIC_ENGLISH_TEMPLATES
+            template_index = 0
+            while len(questions) < question_count:
+                template = templates[template_index % len(templates)]
+                questions.append(self._template_question(template, clean_topic, len(questions) + 1, rng))
+                template_index += 1
 
-        flashcards = self._flashcards(clean_topic, context_chunks=context_chunks, language=language)
+            flashcards = self._flashcards(clean_topic, context_chunks=context_chunks, language=language)
+            generation_mode = "offline_template"
+
         quiz = {
             "topic": clean_topic,
             "language": language,
@@ -131,6 +149,7 @@ class QuizGeneratorAgent:
             "flashcards": flashcards,
             "source_count": len(context_chunks),
             "generated_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
+            "generation_mode": generation_mode,
         }
 
         return {
@@ -142,6 +161,7 @@ class QuizGeneratorAgent:
             "quiz": quiz,
             "questions": questions,
             "flashcards": flashcards,
+            "generation_mode": generation_mode,
         }
 
     def infer_topic(self, message: str, *, fallback: str = "Revision") -> str:
@@ -202,6 +222,110 @@ class QuizGeneratorAgent:
                 }
             )
         return questions
+
+    def _generate_with_llm(
+        self,
+        *,
+        topic: str,
+        count: int,
+        context_chunks: list[dict[str, Any]],
+        language: str,
+    ) -> dict[str, Any] | None:
+        if not self.llm_client.is_available:
+            return None
+
+        source_text = "\n\n".join(
+            f"Source: {chunk.get('source_name', 'uploaded notes')} ({chunk.get('section', 'section')})\n"
+            f"{self._trim(chunk.get('text', ''), max_length=700)}"
+            for chunk in context_chunks[:5]
+            if self._trim(chunk.get("text", ""), max_length=700)
+        )
+        if not source_text:
+            source_text = "No uploaded material excerpts were retrieved. Generate from the topic only."
+
+        response_language = "Arabic" if language == "ar" else "English"
+        system_prompt = (
+            "You generate study quizzes. Return only valid JSON with this shape: "
+            '{"questions":[{"question":"...","options":["...","...","...","..."],'
+            '"answer_index":0,"explanation":"...","source":"..."}],'
+            '"flashcards":[{"front":"...","back":"..."}]}. '
+            "Every question must have exactly four options and answer_index must be 0, 1, 2, or 3."
+        )
+        user_prompt = (
+            f"Language: {response_language}\n"
+            f"Topic: {topic}\n"
+            f"Number of MCQs: {count}\n\n"
+            "Course context:\n"
+            f"{source_text}"
+        )
+
+        try:
+            payload = self.llm_client.generate_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.4,
+                max_tokens=1600,
+            )
+        except Exception:
+            return None
+        if not payload:
+            return None
+
+        questions = self._normalize_llm_questions(payload.get("questions"), topic=topic, count=count)
+        if len(questions) != count:
+            return None
+        flashcards = self._normalize_llm_flashcards(payload.get("flashcards"))
+        if not flashcards:
+            flashcards = self._flashcards(topic, context_chunks=context_chunks, language=language)
+        return {"questions": questions, "flashcards": flashcards}
+
+    def _normalize_llm_questions(self, raw_questions: Any, *, topic: str, count: int) -> list[dict[str, Any]]:
+        if not isinstance(raw_questions, list):
+            return []
+
+        questions = []
+        for index, item in enumerate(raw_questions[:count], start=1):
+            if not isinstance(item, dict):
+                continue
+            options = item.get("options")
+            answer_index = item.get("answer_index")
+            if not isinstance(options, list) or len(options) != 4:
+                continue
+            try:
+                answer_index = int(answer_index)
+            except (TypeError, ValueError):
+                continue
+            if answer_index not in range(4):
+                continue
+            question_text = str(item.get("question") or "").strip()
+            if not question_text:
+                continue
+            questions.append(
+                {
+                    "id": f"llm-{index}",
+                    "type": "mcq",
+                    "topic": topic,
+                    "question": question_text,
+                    "options": [str(option).strip() for option in options],
+                    "answer_index": answer_index,
+                    "explanation": str(item.get("explanation") or "").strip(),
+                    "source": str(item.get("source") or "llm").strip(),
+                }
+            )
+        return questions
+
+    def _normalize_llm_flashcards(self, raw_flashcards: Any) -> list[dict[str, str]]:
+        if not isinstance(raw_flashcards, list):
+            return []
+        flashcards = []
+        for item in raw_flashcards[:6]:
+            if not isinstance(item, dict):
+                continue
+            front = str(item.get("front") or "").strip()
+            back = str(item.get("back") or "").strip()
+            if front and back:
+                flashcards.append({"front": front, "back": back})
+        return flashcards
 
     def _template_question(
         self,

@@ -109,6 +109,34 @@ class CourseMaterialIndexer:
 
         return {"ok": True, "file_name": file_path.name, "chunks": len(chunks)}
 
+    def remove_file(self, file_path: Path, *, delete_source: bool = True) -> dict[str, Any]:
+        file_path = file_path.resolve()
+        uploads_dir = self.uploads_dir.resolve()
+        if not file_path.is_relative_to(uploads_dir):
+            return {"ok": False, "file_name": file_path.name, "reason": "File is outside the uploads directory."}
+
+        store = self._load_store()
+        previous_count = len(store["chunks"])
+        store["chunks"] = [chunk for chunk in store["chunks"] if chunk.get("source_path") != str(file_path)]
+        removed_chunks = previous_count - len(store["chunks"])
+
+        file_deleted = False
+        if delete_source and file_path.exists():
+            if not file_path.is_file():
+                return {"ok": False, "file_name": file_path.name, "reason": "Path is not a file."}
+            file_path.unlink()
+            file_deleted = True
+
+        store["updated_at_utc"] = datetime.utcnow().isoformat(timespec="seconds")
+        self._save_store(store)
+
+        return {
+            "ok": True,
+            "file_name": file_path.name,
+            "file_deleted": file_deleted,
+            "removed_chunks": removed_chunks,
+        }
+
     def search(self, query: str, *, top_k: int = 4, min_score: float = 0.05) -> list[RetrievedChunk]:
         query_vector = self._embed(query)
         if not query_vector:

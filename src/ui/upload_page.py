@@ -17,7 +17,7 @@ def render_upload_page(project_root: Path) -> None:
     indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
     index_stats = indexer.stats()
 
-    stored_files = sorted(uploads_dir.glob("*"))
+    stored_files = _stored_material_files(uploads_dir)
     total_size_mb = round(sum(file.stat().st_size for file in stored_files) / (1024 * 1024), 2) if stored_files else 0.0
 
     render_page_hero(
@@ -84,6 +84,7 @@ def render_upload_page(project_root: Path) -> None:
         st.info("No files uploaded yet.")
         return
 
+    st.caption("Delete removes the source file and its indexed chunks from Course RAG.")
     table_rows = []
     for file_path in stored_files:
         stat = file_path.stat()
@@ -104,4 +105,37 @@ def render_upload_page(project_root: Path) -> None:
             "size_kb": st.column_config.NumberColumn("Size (KB)", format="%.2f"),
             "last_modified_utc": st.column_config.TextColumn("Updated (UTC)", width="medium"),
         },
+    )
+
+    st.markdown("#### Manage files")
+    for file_path in stored_files:
+        stat = file_path.stat()
+        file_col, size_col, action_col = st.columns([3, 1, 1], gap="small")
+        with file_col:
+            st.write(file_path.name)
+        with size_col:
+            st.caption(f"{round(stat.st_size / 1024, 2)} KB")
+        with action_col:
+            if st.button("Delete", key=f"delete_upload_{file_path.name}", width="stretch"):
+                result = indexer.remove_file(file_path)
+                if result["ok"]:
+                    st.session_state.uploads = [
+                        item
+                        for item in st.session_state.get("uploads", [])
+                        if item.get("stored_name") != file_path.name
+                    ]
+                    touch_activity()
+                    st.success(
+                        f"Deleted {file_path.name} and removed {result['removed_chunks']} indexed chunk(s)."
+                    )
+                    st.rerun()
+                else:
+                    st.warning(f"Could not delete {file_path.name}. Reason: {result['reason']}")
+
+
+def _stored_material_files(uploads_dir: Path) -> list[Path]:
+    return sorted(
+        file_path
+        for file_path in uploads_dir.glob("*")
+        if file_path.is_file() and file_path.name != ".gitkeep"
     )

@@ -48,7 +48,13 @@ def render_quiz_page(project_root: Path) -> None:
             st.markdown("#### Quiz setup")
             with st.form("quiz_config_form"):
                 topic = st.text_input("Topic", value=default_topic)
-                question_count = st.slider("Number of questions", min_value=2, max_value=7, value=4)
+                question_count = st.number_input(
+                    "Number of questions",
+                    min_value=1,
+                    value=4,
+                    step=1,
+                    format="%d",
+                )
                 create_quiz = st.form_submit_button("Create quiz", width="stretch")
 
     with history_col:

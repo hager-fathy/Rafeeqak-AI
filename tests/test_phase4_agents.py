@@ -6,6 +6,33 @@ from src.agents.supervisor import SupervisorAgent
 from src.tools.semantic_cache import SemanticResponseCache
 
 
+class FakePlanLLM:
+    is_available = True
+
+    def generate_json(self, **kwargs) -> dict:
+        today = date.today()
+        return {
+            "tasks": [
+                {
+                    "date": today.isoformat(),
+                    "topic": "Indexes",
+                    "phase": "LLM concept review",
+                    "hours": 2,
+                    "task": "Map index types to query patterns.",
+                    "checkpoint": False,
+                },
+                {
+                    "date": (today + timedelta(days=1)).isoformat(),
+                    "topic": "Transactions",
+                    "phase": "LLM checkpoint",
+                    "hours": 2,
+                    "task": "Practice isolation anomalies and take a quiz.",
+                    "checkpoint": True,
+                },
+            ]
+        }
+
+
 def test_input_router_detects_study_plan_intent() -> None:
     routed = InputRouterAgent().route("What should I study today for my exam?")
 
@@ -47,6 +74,45 @@ def test_study_planner_generates_weighted_plan() -> None:
     assert plan["tasks"][0]["topic"] == "SVM"
     assert plan["tasks"][1]["topic"] == "SVM"
     assert plan["tasks"][2]["checkpoint"] is True
+
+
+def test_study_planner_creates_adaptive_task_phases() -> None:
+    result = StudyPlannerAgent().generate(
+        {
+            "course_name": "Databases",
+            "exam_date": date.today() + timedelta(days=6),
+            "daily_hours": 4,
+            "weak_topics": ["Indexes", "Transactions"],
+            "other_topics": ["SQL"],
+        }
+    )
+
+    tasks = result["plan"]["tasks"]
+    phases = {task["phase"] for task in tasks}
+
+    assert len(tasks) == 6
+    assert "Weak-topic practice" in phases
+    assert "Final review" in phases
+    assert any("extra time" in task["task"] for task in tasks)
+    assert any(task["checkpoint"] for task in tasks)
+
+
+def test_study_planner_uses_llm_when_available() -> None:
+    result = StudyPlannerAgent(llm_client=FakePlanLLM()).generate(
+        {
+            "course_name": "Databases",
+            "exam_date": date.today() + timedelta(days=2),
+            "daily_hours": 2,
+            "weak_topics": ["Indexes"],
+            "other_topics": ["Transactions"],
+        }
+    )
+
+    plan = result["plan"]
+    assert result["generation_mode"] == "llm"
+    assert plan["generation_mode"] == "llm"
+    assert plan["tasks"][0]["phase"] == "LLM concept review"
+    assert plan["tasks"][1]["checkpoint"] is True
 
 
 def test_supervisor_runs_traceable_study_plan_route(tmp_path) -> None:

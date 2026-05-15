@@ -42,11 +42,17 @@ def render_study_plan_page(project_root: Path) -> None:
         with st.container(border=True):
             st.markdown("#### Plan configuration")
             with st.form("plan_form"):
-                course_name = st.text_input("Course name", value="Machine Learning")
+                course_name = st.text_input("Course name", placeholder="Example: Machine Learning")
                 exam_date = st.date_input("Exam date", value=date.today() + timedelta(days=10), min_value=date.today())
                 daily_hours = st.number_input("Available study hours per day", min_value=0.5, max_value=12.0, value=2.0, step=0.5)
-                weak_topics_input = st.text_input("Weak topics (comma-separated)", value="SVM, Backpropagation")
-                other_topics_input = st.text_input("Other topics (comma-separated)", value="Linear Regression, Decision Trees")
+                weak_topics_input = st.text_input(
+                    "Weak topics (comma-separated)",
+                    placeholder="Example: SVM, Backpropagation",
+                )
+                other_topics_input = st.text_input(
+                    "Other topics (comma-separated)",
+                    placeholder="Example: Linear Regression, Decision Trees",
+                )
                 submit_plan = st.form_submit_button("Generate study plan", width="stretch")
 
     with summary_col:
@@ -105,6 +111,7 @@ def render_study_plan_page(project_root: Path) -> None:
         column_config={
             "date": st.column_config.TextColumn("Study Date", width="small"),
             "topic": st.column_config.TextColumn("Topic", width="medium"),
+            "phase": st.column_config.TextColumn("Phase", width="medium"),
             "hours": st.column_config.NumberColumn("Hours", format="%.1f h"),
             "checkpoint": st.column_config.CheckboxColumn("Quiz Checkpoint"),
             "completed": st.column_config.CheckboxColumn("Completed"),

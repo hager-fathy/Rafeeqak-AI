@@ -4,6 +4,31 @@ from src.agents.supervisor import SupervisorAgent
 from src.tools.semantic_cache import SemanticResponseCache
 
 
+class FakeQuizLLM:
+    is_available = True
+
+    def generate_json(self, **kwargs) -> dict:
+        return {
+            "questions": [
+                {
+                    "question": "Which rule is central to backpropagation?",
+                    "options": ["Chain rule", "Bayes rule", "Sorting rule", "Voting rule"],
+                    "answer_index": 0,
+                    "explanation": "Backpropagation applies the chain rule through layers.",
+                    "source": "llm",
+                },
+                {
+                    "question": "What does backpropagation compute?",
+                    "options": ["Gradients", "File paths", "Usernames", "Deadlines"],
+                    "answer_index": 0,
+                    "explanation": "It computes gradients for model parameters.",
+                    "source": "llm",
+                },
+            ],
+            "flashcards": [{"front": "Backpropagation", "back": "Computes gradients through layers."}],
+        }
+
+
 def test_quiz_generator_creates_topic_questions_and_flashcards() -> None:
     result = QuizGeneratorAgent().generate(
         topic="Backpropagation",
@@ -26,6 +51,22 @@ def test_quiz_generator_creates_topic_questions_and_flashcards() -> None:
     for question in result["questions"]:
         assert len(question["options"]) == 4
         assert 0 <= question["answer_index"] < 4
+
+
+def test_quiz_generator_honors_large_question_count() -> None:
+    result = QuizGeneratorAgent().generate(topic="Backpropagation", count=12)
+
+    assert result["count"] == 12
+    assert len(result["questions"]) == 12
+
+
+def test_quiz_generator_uses_llm_when_available() -> None:
+    result = QuizGeneratorAgent(llm_client=FakeQuizLLM()).generate(topic="Backpropagation", count=2)
+
+    assert result["generation_mode"] == "llm"
+    assert result["count"] == 2
+    assert result["questions"][0]["id"] == "llm-1"
+    assert result["flashcards"][0]["front"] == "Backpropagation"
 
 
 def test_progress_evaluator_scores_answers_and_flags_weak_topic() -> None:

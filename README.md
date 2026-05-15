@@ -1,6 +1,8 @@
 # Smart Study Planner
 
-This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (multi-agent routing), phase 5 (course-material RAG), phase 6 (quiz generation and evaluation), and phase 7 (CAG and structured database query) of the Smart Study Planner Chatbot project:
+This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (multi-agent routing), phase 5 (course-material RAG), phase 6 (quiz generation and evaluation), and phase 7 (CAG and structured database query) of the Smart Study Planner Chatbot project.
+
+The enhanced roadmap in `project..md` now upgrades Rafeeqak toward a stronger multi-course study assistant where each course has its own materials, study plan, quizzes, flashcards, weak topics, progress, and chat history.
 
 - Phase 1: project setup and base structure
 - Phase 2: Streamlit UI pages (chat, study plan, upload, quiz, dashboard)
@@ -9,6 +11,9 @@ This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (m
 - Phase 5: local text extraction, chunking, vector-store persistence, and grounded Course RAG answers
 - Phase 6: topic/RAG-grounded quiz generation, flashcards, scoring feedback, and weak-topic detection
 - Phase 7: semantic response cache plus structured progress, deadline, score, and weak-topic queries
+- Phase 8: planned multi-course core upgrade with global course selector and course-scoped data
+- Phase 9: planned full Arabic localization, RTL layout, and UI polish
+- Phase 10+: planned prompt templates, planner upgrades, dashboard analytics, flashcards, reminders, exports, and final demo hardening
 
 ## Quick Start
 
@@ -107,6 +112,12 @@ smart-study-planner/
 
 ## Next Phases
 
-Upcoming phases can build on this scaffold by adding:
+Upcoming phases should focus on:
 
-- Multimodal notes, stronger safety filtering, and demo polish
+- Full multi-course separation for materials, plans, quizzes, flashcards, weak topics, progress, and chat history
+- Global course selector before chat, uploads, quiz, dashboard, and planning
+- Full Arabic localization with RTL layout and language toggle
+- Reusable prompt templates for RAG, quizzes, summaries, progress feedback, and planning
+- Course-scoped RAG retrieval with clearer citations
+- Better quiz types, partial text scoring, and stronger personalized feedback
+- Per-course dashboard charts, settings page, reminders, and export features
