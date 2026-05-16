@@ -11,6 +11,7 @@ from src.agents.quiz_generator import QuizGeneratorAgent
 from src.localization import detect_language, t
 from src.retrieval import CourseMaterialIndexer
 from src.tools.quiz_history import append_quiz_history, quiz_history_avoid_questions
+from src.tools.study_plan_tasks import mark_matching_quiz_task_completed, sync_active_plan_history
 from src.tools.state import (
     course_context,
     get_active_course,
@@ -346,6 +347,22 @@ def _record_attempt(
         }
     )
     update_active_course_bucket(quiz_attempts=attempts)
+
+    refreshed_plan = course_context().get("active_plan")
+    if isinstance(refreshed_plan, dict) and active_course:
+        plan_changed = mark_matching_quiz_task_completed(
+            refreshed_plan,
+            course_scope=active_course["id"],
+            topic=evaluation["topic"],
+        )
+        if plan_changed:
+            update_active_course_bucket(
+                active_plan=refreshed_plan,
+                study_plans=sync_active_plan_history(
+                    refreshed_plan,
+                    list(course_context().get("study_plans", []) or []),
+                ),
+            )
 
     active_course_name = None
     if active_course:

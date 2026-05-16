@@ -195,6 +195,7 @@ class StudyPlannerAgent:
                 hours = float(item.get("hours", daily_hours))
             except (TypeError, ValueError):
                 hours = daily_hours
+            checkpoint = bool(item.get("checkpoint"))
             tasks.append(
                 {
                     "date": plan_date.isoformat(),
@@ -203,7 +204,8 @@ class StudyPlannerAgent:
                     "phase": phase,
                     "hours": round(min(max(hours, 0.5), 12.0), 1),
                     "task": task_text,
-                    "checkpoint": bool(item.get("checkpoint")),
+                    "checkpoint": checkpoint,
+                    "quiz_required": checkpoint,
                     "completed": False,
                 }
             )
@@ -288,6 +290,7 @@ class StudyPlannerAgent:
                     difficulty=difficulty,
                 )
 
+            quiz_required = checkpoint if phase != "recovery" else False
             tasks.append(
                 {
                     "date": plan_date.isoformat(),
@@ -296,7 +299,8 @@ class StudyPlannerAgent:
                     "phase": self.PHASE_LABELS[phase],
                     "hours": round(self._planned_hours(daily_hours=daily_hours, difficulty=difficulty, phase=phase), 1),
                     "task": task_text,
-                    "checkpoint": checkpoint if phase != "recovery" else False,
+                    "checkpoint": quiz_required,
+                    "quiz_required": quiz_required,
                     "completed": False,
                 }
             )

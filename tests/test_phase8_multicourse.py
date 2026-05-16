@@ -82,19 +82,40 @@ def test_course_rename_and_delete_update_active_state() -> None:
 
 
 def test_plan_timeline_completion_updates_active_plan_and_history() -> None:
+    from src.tools.study_plan_tasks import build_task_id
+
+    tasks = [
+        {
+            "date": "2026-05-01",
+            "topic": "SVM",
+            "phase": "Concept review",
+            "task": "Review notes",
+            "completed": False,
+        },
+        {
+            "date": "2026-05-02",
+            "topic": "Trees",
+            "phase": "Practice",
+            "task": "Solve exercises",
+            "completed": False,
+        },
+    ]
+    for task in tasks:
+        task["task_id"] = build_task_id(task, "course-ml")
     plan = {
         "course_name": "Machine Learning",
         "exam_date": "2026-06-01",
-        "tasks": [
-            {"topic": "SVM", "completed": False},
-            {"topic": "Trees", "completed": False},
-        ],
+        "tasks": tasks,
     }
     history = [{"course_name": "Machine Learning", "exam_date": "2026-06-01", "tasks": list(plan["tasks"])}]
 
     changed = _apply_completed_updates(
         plan,
-        [{"completed": True}, {"completed": False}],
+        [
+            {"task_id": tasks[0]["task_id"], "mark_as_done": True},
+            {"task_id": tasks[1]["task_id"], "mark_as_done": False},
+        ],
+        course_scope="course-ml",
     )
     synced_history = _sync_active_plan_history(plan, history)
 
