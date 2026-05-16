@@ -259,22 +259,31 @@ def _render_course_management(courses: list[dict], active_course: dict | None, l
                         st.warning(_course_management_reason(result["reason"], language))
 
         with delete_col:
-            with st.form(f"delete_course_{selected_id}", border=False):
-                st.caption(t("nav.delete_course_caption", language, course_name=selected_course["name"]))
-                confirmed = st.checkbox(t("nav.delete_course_confirm", language))
-                submitted = st.form_submit_button(
-                    t("nav.delete_course", language),
-                    use_container_width=True,
-                    disabled=not confirmed,
-                )
-                if submitted:
-                    _course_indexer().remove_course(course_id=selected_id)
-                    result = delete_course(selected_id)
-                    if result["ok"]:
-                        st.success(t("nav.course_deleted", language, course_name=result["course"]["name"]))
-                        st.rerun()
-                    else:
-                        st.warning(_course_management_reason(result["reason"], language))
+            st.caption(t("nav.delete_course_caption", language, course_name=selected_course["name"]))
+            confirm_key = f"delete_course_confirm_{selected_id}"
+            confirmed = st.checkbox(t("nav.delete_course_confirm", language), key=confirm_key)
+            if st.button(
+                t("nav.delete_course", language),
+                use_container_width=True,
+                disabled=not confirmed,
+                key=f"delete_course_button_{selected_id}",
+            ):
+                try:
+                    index_result = _course_indexer().remove_course(course_id=selected_id)
+                except OSError as exc:
+                    st.warning(t("nav.delete_course_failed", language, reason=str(exc)))
+                    return
+
+                if not index_result.get("ok", False):
+                    st.warning(t("nav.delete_course_failed", language, reason=index_result.get("reason", "unknown")))
+                    return
+
+                result = delete_course(selected_id)
+                if result["ok"]:
+                    st.success(t("nav.course_deleted", language, course_name=result["course"]["name"]))
+                    st.rerun()
+                else:
+                    st.warning(_course_management_reason(result["reason"], language))
 
 
 def _course_indexer() -> CourseMaterialIndexer:

@@ -129,7 +129,8 @@ def test_rag_agent_uses_rag_prompt_template(tmp_path) -> None:
     ).answer("What uses gradients?", course_id="ml", course_name="Machine Learning")
 
     assert result["generation_mode"] == "llm"
-    assert "Course-material excerpts" in llm.calls[0]["user_prompt"]
+    assert "Retrieved context" in llm.calls[0]["user_prompt"]
+    assert "Available source labels" in llm.calls[0]["user_prompt"]
     assert "Machine Learning" in llm.calls[0]["user_prompt"]
 
 

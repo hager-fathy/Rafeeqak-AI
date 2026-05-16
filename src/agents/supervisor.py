@@ -361,15 +361,22 @@ class SupervisorAgent:
         if active_plan and active_plan.get("weak_topics"):
             fallback_topic = active_plan["weak_topics"][0]
         topic = self.quiz_generator.infer_topic(routed_input["message"], fallback=fallback_topic)
+        if context.get("active_course_id"):
+            self.course_rag.indexer.index_all(
+                course_id=context.get("active_course_id"),
+                course_name=context.get("active_course_name"),
+            )
         context_matches = self.course_rag.indexer.search(
             topic,
-            top_k=3,
+            top_k=5,
             course_id=context.get("active_course_id"),
         )
         context_chunks = [
             {
                 "source_name": match.source_name,
                 "section": match.section,
+                "chunk_index": match.chunk_index,
+                "course_name": context.get("active_course_name"),
                 "text": match.text,
                 "score": match.score,
             }
@@ -411,6 +418,11 @@ class SupervisorAgent:
             course_id=context.get("active_course_id"),
             course_name=context.get("active_course_name"),
         )
+        action = (
+            "asked for a clearer topic before retrieving course-material chunks"
+            if rag_result["status"] == "needs_clarification"
+            else "retrieved relevant course-material chunks"
+        )
         return {
             "response": rag_result["response"],
             "payload": rag_result,
@@ -418,7 +430,7 @@ class SupervisorAgent:
                 self._trace_step(
                     "run_agent",
                     "CourseRAGAgent",
-                    "retrieved relevant course-material chunks",
+                    action,
                     "completed" if rag_result["ok"] else rag_result["status"],
                     {
                         "uploaded_files": len(uploads),

@@ -105,23 +105,3 @@ def render_dashboard_page(project_root: Path) -> None:
                     st.dataframe(pd.DataFrame(weak_topics), hide_index=True, use_container_width=True)
                 else:
                     st.info(t("dashboard.no_weak_topics", language))
-
-    with st.expander(t("dashboard.route_traces", language), expanded=False):
-        route_traces = st.session_state.get("route_traces", [])
-        if not route_traces:
-            st.info(t("dashboard.no_traces", language))
-        else:
-            trace_rows = []
-            for trace_index, trace in enumerate(route_traces[-10:], start=1):
-                for step in trace:
-                    trace_rows.append(
-                        {
-                            "trace": trace_index,
-                            "time_utc": step["timestamp_utc"],
-                            "agent": step["agent"],
-                            "step": step["step"],
-                            "status": step["status"],
-                            "action": step["action"],
-                        }
-                    )
-            st.dataframe(pd.DataFrame(trace_rows), use_container_width=True, hide_index=True)

@@ -29,6 +29,24 @@ class FakeQuizLLM:
         }
 
 
+class DuplicateQuizLLM:
+    is_available = True
+
+    def generate_json(self, **kwargs) -> dict:
+        return {
+            "questions": [
+                {
+                    "question": "Repeated question?",
+                    "options": ["A", "B", "C", "D"],
+                    "answer_index": 0,
+                    "explanation": "duplicate",
+                    "source": "llm",
+                }
+            ],
+            "flashcards": [],
+        }
+
+
 def test_quiz_generator_creates_topic_questions_and_flashcards() -> None:
     result = QuizGeneratorAgent().generate(
         topic="Backpropagation",
@@ -58,6 +76,13 @@ def test_quiz_generator_honors_large_question_count() -> None:
 
     assert result["count"] == 12
     assert len(result["questions"]) == 12
+
+
+def test_quiz_generator_clamps_extreme_question_count() -> None:
+    result = QuizGeneratorAgent().generate(topic="Backpropagation", count=50)
+
+    assert result["count"] == 20
+    assert len(result["questions"]) == 20
 
 
 def test_quiz_generator_supports_difficulty_types_and_repeat_avoidance() -> None:
@@ -93,6 +118,40 @@ def test_quiz_generator_uses_llm_when_available() -> None:
     assert result["count"] == 2
     assert result["questions"][0]["id"] == "llm-1"
     assert result["flashcards"][0]["front"] == "Backpropagation"
+
+
+def test_quiz_generator_falls_back_when_llm_output_is_incomplete() -> None:
+    result = QuizGeneratorAgent(llm_client=DuplicateQuizLLM()).generate(
+        topic="Backpropagation",
+        count=2,
+        previous_questions=["Repeated question?"],
+    )
+
+    assert result["generation_mode"] == "offline_template"
+    assert result["count"] == 2
+    assert all(question["question"] != "Repeated question?" for question in result["questions"])
+
+
+def test_quiz_generator_deduplicates_context_chunks() -> None:
+    result = QuizGeneratorAgent().generate(
+        topic="SOC tiers",
+        count=2,
+        context_chunks=[
+            {
+                "source_name": "soc.pdf",
+                "section": "page 1",
+                "text": "SOC tiers divide analyst responsibilities into escalating levels.",
+            },
+            {
+                "source_name": "soc.pdf",
+                "section": "page 1",
+                "text": "SOC tiers divide analyst responsibilities into escalating levels.",
+            },
+        ],
+    )
+
+    assert result["quiz"]["source_count"] == 1
+    assert result["questions"][0]["source"] == "soc.pdf (page 1)"
 
 
 def test_progress_evaluator_scores_answers_and_flags_weak_topic() -> None:

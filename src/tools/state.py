@@ -22,7 +22,6 @@ COURSE_SCOPED_KEYS = (
     "last_quiz_feedback",
     "uploads",
     "generated_questions",
-    "route_traces",
 )
 
 WORKSPACE_VERSION = 1
@@ -38,7 +37,6 @@ def _empty_course_bucket() -> dict:
         "last_quiz_feedback": None,
         "uploads": [],
         "generated_questions": [],
-        "route_traces": [],
     }
 
 
@@ -63,7 +61,6 @@ def init_state() -> None:
         "uploads": [],
         "last_activity_at": datetime.utcnow().isoformat(timespec="seconds"),
         "memory_sync_notice": None,
-        "route_traces": [],
         "auth_user": None,
         "auth_access_token": None,
         "auth_refresh_token": None,
@@ -357,14 +354,6 @@ def get_supervisor_agent() -> SupervisorAgent:
     if "supervisor_agent" not in st.session_state:
         st.session_state["supervisor_agent"] = SupervisorAgent()
     return st.session_state["supervisor_agent"]
-
-
-def append_route_trace(trace: list[dict]) -> None:
-    if "route_traces" not in st.session_state:
-        st.session_state["route_traces"] = []
-    st.session_state["route_traces"].append(trace)
-    st.session_state["route_traces"] = st.session_state["route_traces"][-20:]
-    update_active_course_bucket(route_traces=st.session_state["route_traces"])
 
 
 def set_authenticated_user(

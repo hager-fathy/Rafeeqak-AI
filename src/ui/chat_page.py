@@ -4,7 +4,6 @@ import streamlit as st
 
 from src.localization import t
 from src.tools.state import (
-    append_route_trace,
     course_context,
     get_active_course,
     get_authenticated_user,
@@ -27,7 +26,6 @@ def _assistant_reply(user_message: str) -> str:
         context=context,
         memory_agent=get_memory_agent(),
     )
-    append_route_trace(result["trace"])
     if result["agent"] == "quiz_generator_agent" and result.get("payload", {}).get("quiz"):
         generated_questions = context.get("generated_questions", [])
         generated_questions.extend(question["question"] for question in result["payload"].get("questions", []))
@@ -106,13 +104,6 @@ def render_chat_page(project_root: Path) -> None:
             len(current_context["study_plans"]),
             border=True,
         )
-        route_traces = st.session_state.get("route_traces", [])
-        st.metric(t("chat.route_traces", language), len(route_traces), border=True)
-        if route_traces:
-            with st.expander(t("chat.latest_trace", language), expanded=False):
-                for step in route_traces[-1]:
-                    st.caption(f"{step['agent']} | {step['step']} | {step['status']}")
-                    st.write(step["action"])
         if st.button(t("chat.clear", language), use_container_width=True):
             update_active_course_bucket(chat_history=[])
             touch_activity()

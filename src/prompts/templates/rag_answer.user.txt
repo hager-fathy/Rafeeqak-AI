@@ -1,11 +1,13 @@
-Course: {{course_name}}
-Response language: {{language}}
+Course:
+{{course_name}}
+
+Retrieved context:
+{{context}}
 
 Student question:
 {{question}}
 
-Course-material excerpts:
-{{context}}
-
-Citation labels:
+Available source labels:
 {{citations}}
+
+Answer in {{language}}:

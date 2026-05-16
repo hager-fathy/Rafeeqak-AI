@@ -1,9 +1,9 @@
 import streamlit as st
 
 from src.retrieval import CourseMaterialIndexer
+from src.ui.study_plan_page import _apply_completed_updates, _sync_active_plan_history
 from src.tools.state import (
     add_course,
-    append_route_trace,
     course_context,
     delete_course,
     get_active_course,
@@ -27,14 +27,12 @@ def test_multi_course_state_is_separated() -> None:
         chat_history=[{"role": "user", "content": "math chat"}],
         quiz_attempts=[{"score_percent": 80, "weak_topics": ["limits"]}],
     )
-    append_route_trace([{"agent": "input", "step": "route"}])
 
     physics = add_course("Physics")
     update_active_course_bucket(
         chat_history=[{"role": "user", "content": "physics chat"}],
         quiz_attempts=[{"score_percent": 60, "weak_topics": ["waves"]}],
     )
-    append_route_trace([{"agent": "input", "step": "route"}])
 
     assert course_context()["chat_history"][0]["content"] == "physics chat"
     assert course_context()["quiz_attempts"][0]["weak_topics"] == ["waves"]
@@ -43,11 +41,10 @@ def test_multi_course_state_is_separated() -> None:
     set_active_course(math["id"])
     assert course_context()["chat_history"][0]["content"] == "math chat"
     assert course_context()["quiz_attempts"][0]["weak_topics"] == ["limits"]
-    assert len(st.session_state["route_traces"]) == 1
     assert course_context()["all_courses"][0]["average_score"] == 80
 
     set_active_course(physics["id"])
-    assert len(st.session_state["route_traces"]) == 1
+    assert course_context()["chat_history"][0]["content"] == "physics chat"
 
 
 def test_course_rename_and_delete_update_active_state() -> None:
@@ -73,15 +70,37 @@ def test_course_rename_and_delete_update_active_state() -> None:
     assert st.session_state["chat_history"] == []
 
 
-def test_legacy_course_bucket_missing_route_traces_gets_default() -> None:
+def test_plan_timeline_completion_updates_active_plan_and_history() -> None:
+    plan = {
+        "course_name": "Machine Learning",
+        "exam_date": "2026-06-01",
+        "tasks": [
+            {"topic": "SVM", "completed": False},
+            {"topic": "Trees", "completed": False},
+        ],
+    }
+    history = [{"course_name": "Machine Learning", "exam_date": "2026-06-01", "tasks": list(plan["tasks"])}]
+
+    changed = _apply_completed_updates(
+        plan,
+        [{"completed": True}, {"completed": False}],
+    )
+    synced_history = _sync_active_plan_history(plan, history)
+
+    assert changed is True
+    assert plan["tasks"][0]["completed"] is True
+    assert synced_history[0] is plan
+
+
+def test_legacy_course_bucket_missing_key_gets_default() -> None:
     init_state()
     course = add_course("Operating Systems")
-    st.session_state["course_data"][course["id"]].pop("route_traces")
-    st.session_state["route_traces"] = None
+    st.session_state["course_data"][course["id"]].pop("current_quiz")
+    st.session_state["current_quiz"] = {"legacy": True}
 
     set_active_course(course["id"])
 
-    assert st.session_state["route_traces"] == []
+    assert st.session_state["current_quiz"] is None
     assert course_context()["chat_history"] == []
 
 

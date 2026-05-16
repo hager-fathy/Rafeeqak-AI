@@ -90,6 +90,7 @@ def render_quiz_page(project_root: Path) -> None:
                 question_count = st.number_input(
                     t("quiz.count", language),
                     min_value=1,
+                    max_value=20,
                     value=4,
                     step=1,
                     format="%d",
@@ -113,39 +114,51 @@ def render_quiz_page(project_root: Path) -> None:
             )
 
     if create_quiz:
-        quiz_language = detect_language(topic)
-        if quiz_language != "ar":
-            quiz_language = language
-        context_matches = indexer.search(topic, top_k=3, course_id=course_id)
-        context_chunks = [
-            {
-                "source_name": match.source_name,
-                "section": match.section,
-                "course_name": course_name,
-                "text": match.text,
-                "score": match.score,
-            }
-            for match in context_matches
-        ]
-        quiz_result = quiz_generator.generate(
-            topic=topic,
-            count=question_count,
-            context_chunks=context_chunks,
-            language=quiz_language,
-            difficulty=difficulty,
-            question_types=question_types,
-            previous_questions=current_context.get("generated_questions", []),
-        )
-        generated_questions = current_context.get("generated_questions", [])
-        generated_questions.extend(question["question"] for question in quiz_result["questions"])
-        update_active_course_bucket(
-            current_quiz=quiz_result["quiz"],
-            last_quiz_feedback=None,
-            generated_questions=generated_questions[-120:],
-        )
-        touch_activity()
-        source_note = t("quiz.source_note", language, count=len(context_chunks)) if context_chunks else ""
-        st.success(t("quiz.generated", language, source_note=source_note))
+        topic = " ".join(topic.split())
+        if not topic:
+            st.warning(t("quiz.topic_required", language))
+        elif not question_types:
+            st.warning(t("quiz.type_required", language))
+        else:
+            quiz_language = detect_language(topic)
+            if quiz_language != "ar":
+                quiz_language = language
+            indexer.index_all(course_id=course_id, course_name=course_name)
+            context_matches = indexer.search(
+                topic,
+                top_k=min(max(int(question_count), 3), 8),
+                course_id=course_id,
+            )
+            context_chunks = [
+                {
+                    "source_name": match.source_name,
+                    "section": match.section,
+                    "chunk_index": match.chunk_index,
+                    "course_name": course_name,
+                    "text": match.text,
+                    "score": match.score,
+                }
+                for match in context_matches
+            ]
+            quiz_result = quiz_generator.generate(
+                topic=topic,
+                count=question_count,
+                context_chunks=context_chunks,
+                language=quiz_language,
+                difficulty=difficulty,
+                question_types=question_types,
+                previous_questions=current_context.get("generated_questions", []),
+            )
+            generated_questions = current_context.get("generated_questions", [])
+            generated_questions.extend(question["question"] for question in quiz_result["questions"])
+            update_active_course_bucket(
+                current_quiz=quiz_result["quiz"],
+                last_quiz_feedback=None,
+                generated_questions=generated_questions[-120:],
+            )
+            touch_activity()
+            source_note = t("quiz.source_note", language, count=len(context_chunks)) if context_chunks else ""
+            st.success(t("quiz.generated", language, source_note=source_note))
 
     quiz = _current_quiz()
     if not quiz:

@@ -7,7 +7,6 @@ import streamlit as st
 from src.localization import t
 from src.tools.state import (
     add_course,
-    append_route_trace,
     course_context,
     get_active_course,
     get_authenticated_user,
@@ -22,6 +21,42 @@ from src.ui.theme import render_page_hero
 
 def _parse_topics(raw_text: str) -> list[str]:
     return [item.strip() for item in raw_text.split(",") if item.strip()]
+
+
+def _apply_completed_updates(active_plan: dict, edited_rows: list[dict]) -> bool:
+    tasks = active_plan.get("tasks", [])
+    if not isinstance(tasks, list):
+        return False
+
+    changed = False
+    for index, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+        edited_completed = False
+        if index < len(edited_rows):
+            edited_completed = bool(edited_rows[index].get("completed"))
+        if bool(task.get("completed")) != edited_completed:
+            task["completed"] = edited_completed
+            changed = True
+    return changed
+
+
+def _sync_active_plan_history(active_plan: dict, study_plans: list[dict]) -> list[dict]:
+    for index in range(len(study_plans) - 1, -1, -1):
+        plan = study_plans[index]
+        if plan is active_plan or _same_plan_identity(plan, active_plan):
+            study_plans[index] = active_plan
+            return study_plans
+    return study_plans
+
+
+def _same_plan_identity(left: dict, right: dict) -> bool:
+    return (
+        isinstance(left, dict)
+        and left.get("course_name") == right.get("course_name")
+        and left.get("exam_date") == right.get("exam_date")
+        and len(left.get("tasks", []) or []) == len(right.get("tasks", []) or [])
+    )
 
 
 def render_study_plan_page(project_root: Path) -> None:
@@ -121,7 +156,6 @@ def render_study_plan_page(project_root: Path) -> None:
             student_email=student_email,
             student_name=student_name,
         )
-        append_route_trace(plan_result["trace"])
         plan = plan_result["plan"]
         study_plans = current_context["study_plans"]
         study_plans.append(plan)
@@ -140,18 +174,33 @@ def render_study_plan_page(project_root: Path) -> None:
         st.info(t("planner.no_plan", language))
         return
 
-    tasks_df = pd.DataFrame(active_plan["tasks"])
+    tasks = active_plan.get("tasks", [])
+    for task in tasks:
+        if isinstance(task, dict):
+            task.setdefault("completed", False)
+
+    tasks_df = pd.DataFrame(tasks)
     st.markdown(f"### {t('planner.timeline', language)}")
-    st.dataframe(
+    edited_df = st.data_editor(
         tasks_df,
         use_container_width=True,
         hide_index=True,
+        disabled=[column for column in tasks_df.columns if column != "completed"],
+        key=f"plan_timeline_editor_{active_plan.get('course_name', 'course')}_{active_plan.get('exam_date', 'date')}",
         column_config={
             "date": st.column_config.TextColumn(t("planner.col.study_date", language), width="small"),
             "topic": st.column_config.TextColumn(t("planner.col.topic", language), width="medium"),
             "phase": st.column_config.TextColumn(t("planner.col.phase", language), width="medium"),
+            "task": st.column_config.TextColumn(t("planner.col.task", language), width="large"),
             "hours": st.column_config.NumberColumn(t("planner.col.hours", language), format="%.1f h"),
             "checkpoint": st.column_config.CheckboxColumn(t("planner.col.checkpoint", language)),
             "completed": st.column_config.CheckboxColumn(t("planner.col.completed", language)),
         },
     )
+    if _apply_completed_updates(active_plan, edited_df.to_dict("records")):
+        update_active_course_bucket(
+            active_plan=active_plan,
+            study_plans=_sync_active_plan_history(active_plan, course_context().get("study_plans", [])),
+        )
+        touch_activity()
+        st.success(t("planner.timeline_saved", language))
