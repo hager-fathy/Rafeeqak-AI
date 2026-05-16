@@ -15,11 +15,13 @@ from src.localization import normalize_language, t
 
 COURSE_SCOPED_KEYS = (
     "chat_history",
+    "chat_summaries",
     "study_plans",
     "active_plan",
     "quiz_attempts",
     "current_quiz",
     "last_quiz_feedback",
+    "reminders",
     "uploads",
     "generated_questions",
 )
@@ -30,11 +32,13 @@ WORKSPACE_VERSION = 1
 def _empty_course_bucket() -> dict:
     return {
         "chat_history": [],
+        "chat_summaries": [],
         "study_plans": [],
         "active_plan": None,
         "quiz_attempts": [],
         "current_quiz": None,
         "last_quiz_feedback": None,
+        "reminders": [],
         "uploads": [],
         "generated_questions": [],
     }
@@ -53,11 +57,13 @@ def _normalize_course_bucket(bucket: dict | None) -> dict:
 def init_state() -> None:
     defaults = {
         "chat_history": [],
+        "chat_summaries": [],
         "study_plans": [],
         "active_plan": None,
         "quiz_attempts": [],
         "current_quiz": None,
         "last_quiz_feedback": None,
+        "reminders": [],
         "uploads": [],
         "last_activity_at": datetime.utcnow().isoformat(timespec="seconds"),
         "memory_sync_notice": None,
@@ -257,6 +263,20 @@ def update_active_course_bucket(**values: object) -> None:
     _save_user_workspace()
 
 
+def upsert_active_chat_summary(summary: dict, *, limit: int = 20) -> None:
+    active_course = get_active_course()
+    if active_course is None:
+        return
+
+    bucket = get_active_course_bucket()
+    summaries = list(bucket.get("chat_summaries", []) or [])
+    summary_id = summary.get("summary_id")
+    if summary_id:
+        summaries = [item for item in summaries if item.get("summary_id") != summary_id]
+    summaries.append(summary)
+    update_active_course_bucket(chat_summaries=summaries[-limit:])
+
+
 def course_context() -> dict:
     active_course = get_active_course()
     bucket = get_active_course_bucket()
@@ -267,8 +287,10 @@ def course_context() -> dict:
         "active_plan": bucket.get("active_plan"),
         "study_plans": bucket.get("study_plans", []),
         "quiz_attempts": bucket.get("quiz_attempts", []),
+        "reminders": bucket.get("reminders", []),
         "uploads": bucket.get("uploads", []),
         "chat_history": bucket.get("chat_history", []),
+        "chat_summaries": bucket.get("chat_summaries", []),
         "generated_questions": bucket.get("generated_questions", []),
         "all_courses": _all_course_summaries(),
         "selected_language": get_selected_language(),
@@ -337,6 +359,8 @@ def _all_course_summaries() -> list[dict]:
                 "quiz_attempts": len(quiz_attempts),
                 "average_score": average_score,
                 "uploads": len(bucket.get("uploads", []) or []),
+                "reminders": len(bucket.get("reminders", []) or []),
+                "chat_summaries": len(bucket.get("chat_summaries", []) or []),
                 "weak_topics": sorted(weak_topics),
                 "exam_date": active_plan.get("exam_date") if isinstance(active_plan, dict) else None,
             }

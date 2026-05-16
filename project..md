@@ -288,6 +288,119 @@ Return a clear answer and cite sources as:
 Course Name - File Name - Page/Chunk.
 """
 ```
+ChatGPT
+
+
+
+
+
+### Phase 1 — Project Setup
+Before building the main features, the project must have a strong technical foundation. This phase prepares the codebase, development environment, dependencies, configuration files, and testing setup. Because Rafeeqak  includes many connected parts such as Streamlit UI, multi-agent routing, RAG, quizzes, memory, database storage, localization, and reminders, the project structure must be clear from the beginning.
+
+
+The main purpose of this phase is to make the app easy to run, test, and extend. A clean setup also helps the team avoid duplicated code and confusion later. Each major feature should have a clear place in the project, such as pages for UI, agents for intelligence, repositories for database access, services for shared logic, and prompts for LLM templates.
+
+### Phase 2 — Basic UI
+
+After the project foundation is ready, the next step is to build the main user interface. The app should include the pages that students will use regularly, such as login, sign-up, account, chat, study plan, upload materials, quiz, and dashboard. At this stage, the pages do not need to have all advanced logic, but they should provide a clear structure for the full app experience.
+
+The interface should be simple, friendly, and organized. Students should understand where to go and what each page is for. Empty pages should not look broken. Instead, they should show helpful messages that guide the student, such as asking them to create a course, upload materials, or start a study plan.
+
+This phase is important because Rafeeqak is not only an AI system; it is also a student-facing product. A polished interface makes the app easier to demonstrate and easier to use.
+
+
+### Phase 3 — Database and Memory
+
+This phase focuses on storing and organizing the student’s data. Rafeeqak needs to remember courses, uploaded files, study plans, quiz attempts, quiz scores, weak topics, deadlines, progress, chat history, and user preferences. This information should be saved using Supabase when available, while still supporting local session fallback when Supabase is not configured.
+
+The most important idea in this phase is course-scoped memory. Since a student may study more than one course, data from different courses must never be mixed. For example, Machine Learning quiz scores should stay inside the Machine Learning course, and Databases weak topics should stay inside the Databases course.
+
+Every important data record should include a course identifier when it belongs to a course. This makes the system safer, more organized, and more useful for future features such as dashboards, reminders, and personalized planning.
+
+
+### Phase 4 — Multi-Agent Flow
+
+This phase creates the intelligent control flow of Rafeeqak. Instead of using one large function to answer every user request, the app should use several specialized agents. Each agent should have a clear responsibility. For example, the Input Router Agent detects the user’s intent, the Study Planner Agent creates plans, the Course RAG Agent answers from uploaded materials, and the Quiz Generator Agent creates quizzes.
+
+The Supervisor Agent should manage the full request pipeline. A request should pass through safety checking, language detection, course selection validation, intent routing, cache checking, specialist agent execution, and final response generation. This makes the system easier to debug and test because every step has a defined role.
+
+This phase also helps Rafeeqak behave more like a real study assistant. It can decide whether the student wants an explanation, a quiz, a progress summary, a study plan, or a database-based answer, then route the request correctly.
+
+### Phase 5 — RAG System
+
+This phase allows Rafeeqak to answer questions using the student’s uploaded course materials. Students should be able to upload files such as PDFs, DOCX files, PPTX files, Markdown files, and text files. The app should extract the text, split it into useful chunks, index the content, and retrieve the most relevant parts when the student asks a question.
+
+The RAG system must be fully course-scoped. If the active course is Machine Learning, Rafeeqak should only search Machine Learning files. It should not use materials from Databases, Security, or any other course. This prevents incorrect answers and keeps the student’s study experience organized.
+
+The final answer should not simply dump raw retrieved chunks. It should explain the topic clearly, summarize the useful information, and include citations that show the course name, file name, and page or chunk reference. If the student asks a vague question such as “explain” or “اشرح”, the system should ask what topic they want explained before retrieving materials.
+
+### Phase 6 — Quiz and Evaluation
+
+This phase turns Rafeeqak into an active learning tool. Instead of only answering questions, the app should help students test themselves using quizzes generated from the selected course materials. The student should be able to choose the quiz difficulty, number of questions, topic, and question types.
+
+The quiz system should support different types of questions, such as multiple choice, true/false, short answer, and matching. This makes practice more flexible and closer to real exam preparation. The system should also avoid generating the same questions repeatedly for the same course.
+
+Evaluation should be more than a final score. Rafeeqak should explain why answers are correct or incorrect, give partial credit for written answers, identify weak topics, and save those weak topics under the selected course. This information can later improve the study planner, dashboard, and recommendations.
+
+The quiz page should also provide clear status feedback. Students should know when a quiz is loading, when it has been generated successfully, and when generation fails. If something goes wrong, the app should show a friendly error message and allow the student to retry.
+
+### Phase 7 — CAG and Structured Database Query
+
+This phase improves both performance and usefulness. CAG, or semantic cache, should help Rafeeqak reuse answers for repeated safe questions. However, caching must be handled carefully. A cached answer should depend on the selected course, selected language, and current context. An answer from Machine Learning should not appear in Databases, and an English answer should not be reused when Arabic is selected.
+
+The cache should also avoid state-changing actions. Actions such as generating a quiz, creating a study plan, submitting answers, updating settings, or changing preferences should always run fresh because they change the student’s data.
+
+Structured database querying allows Rafeeqak to answer questions from stored progress data. For example, a student may ask about weak topics, completed tasks, delayed tasks, upcoming deadlines, average score, or progress across courses. These answers should come from the database or local memory, not from general LLM guessing.
+
+### Phase 8 — Multi-Course Core Upgrade
+
+This is one of the most important phases in the whole project. Rafeeqak should work as a true multi-course study platform, not only as a single-course assistant. Students should be able to create courses, select the active course, and use every major feature inside that selected course.
+
+All course-related data must be separated. This includes uploaded materials, RAG indexes, chat history, study plans, quiz attempts, weak topics, progress records, dashboard summaries, route traces, and reminders. The selected course should control what the student sees and what the system uses.
+
+If no course exists, the app should guide the student to create one. If courses exist but none is selected, the app should ask the student to select a course before using chat, uploads, quizzes, study planning, or dashboard features. This prevents accidental data mixing and makes the app easier to understand.
+
+### Phase 9 — Localization and UI Polish
+
+This phase makes Rafeeqak usable in both English and Arabic. The app should include a language toggle and save the student’s language preference. When Arabic is selected, the interface should support RTL layout so the app feels natural for Arabic-speaking users.
+
+Localization should cover the full product experience, not only a few page titles. Buttons, alerts, errors, empty states, assistant responses, quiz feedback, dashboard labels, settings labels, and reminder messages should all be translated. The system should also detect Arabic input and respond appropriately.
+
+This phase also includes visual polish. The spacing, colors, layout, labels, buttons, and page sections should feel consistent across the app. The goal is to make Rafeeqak look like a finished product instead of a rough prototype.
+
+### Phase 10 — Prompt Templates and LLM Quality
+
+This phase improves the quality and maintainability of the AI responses. Instead of keeping prompts hardcoded inside different agents, prompts should be moved into reusable template files. This makes the system easier to update, test, and improve.
+
+Each prompt should include the correct variables, such as course name, language, question, context, citations, lecture title, topic, difficulty, number of questions, score, weak topics, recommendations, tasks, and deadlines. This helps the LLM produce more consistent and relevant responses.
+
+The prompt templates should also guide Rafeeqak to behave like a careful study assistant. It should answer clearly, avoid raw chunk dumping, ask clarifying questions when needed, produce localized responses, and give student-friendly explanations.
+
+### Phase 11 — Study Planner Upgrade
+
+This phase makes the study planner more personalized and useful. Instead of creating a generic plan, Rafeeqak should collect the information needed to build a realistic study schedule. This includes the number of lectures, target finish period, daily available study time, course difficulty, exam date, current progress, and weak topics.
+
+The plan should prioritize weak topics first because those are the areas where the student needs the most support. After that, it should continue with the remaining topics in a logical order. The plan should also consider the student’s available time and deadlines so the schedule feels realistic.
+
+The planner should also detect delayed or missed tasks and suggest recovery actions. For example, if a student missed two study sessions, Rafeeqak should recommend how to catch up without making the plan impossible to follow.
+
+### Phase 12 — Dashboard, Settings, and Reminders
+
+This phase makes Rafeeqak feel like a complete study platform. The dashboard should give students a clear overview of their learning status across courses. It should show course cards, progress, completed tasks, upcoming tasks, quiz scores, average score, weak topics, uploaded materials, deadlines, and reminder summaries.
+
+The settings page should allow students to customize their experience. They should be able to edit their name, language, daily study hours, quiz preferences, difficulty level, study preferences, and reminder preferences. These settings should improve personalization across the app.
+
+Reminders should help students stay consistent. Rafeeqak should notify students about upcoming lectures, revision sessions, quizzes, missed study tasks, and deadlines. These reminders should be stored with course information so each reminder belongs to the correct course.
+
+###Phase 13 — Testing and Demo
+
+This final phase proves that the app works correctly and is ready to present. Automated tests should cover the most important behavior, especially course separation, course selector gating, Arabic localization, RTL layout, RAG retrieval, quiz generation, partial scoring, chat summaries, reminders, and dashboard data.
+
+Testing should also confirm that the app does not mix data between courses. This is one of the most important risks in the project. For example, a quiz generated in Machine Learning should not affect Databases weak topics, and RAG should only retrieve from the active course.
+
+The final demo should tell a complete story. A student creates two courses, uploads materials, asks course-specific questions, generates a study plan, takes a quiz, receives feedback, switches to another course, sees separated data, opens the dashboard, and changes the language to Arabic. This will show that Rafeeqak is not just a collection of features, but a complete multi-course study assistant.
+
+
 
 ---
 

@@ -76,11 +76,28 @@ create table if not exists public.weak_topics (
     unique (student_id, course_id, topic)
 );
 
+create table if not exists public.chat_session_summaries (
+    id uuid primary key default gen_random_uuid(),
+    student_id uuid not null references public.student_profiles(id) on delete cascade,
+    course_id uuid references public.courses(id) on delete cascade,
+    session_key text not null default 'active_session',
+    language text not null default 'en',
+    message_count integer not null default 0,
+    main_topics text[] not null default '{}',
+    weaknesses text[] not null default '{}',
+    next_steps text[] not null default '{}',
+    summary text not null default '',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (student_id, course_id, session_key)
+);
+
 create index if not exists idx_courses_student_id on public.courses(student_id);
 create index if not exists idx_exams_student_course on public.exams(student_id, course_id);
 create index if not exists idx_study_tasks_student_course on public.study_tasks(student_id, course_id);
 create index if not exists idx_quiz_scores_student_time on public.quiz_scores(student_id, attempted_at desc);
 create index if not exists idx_weak_topics_student on public.weak_topics(student_id);
+create index if not exists idx_chat_summaries_student_course on public.chat_session_summaries(student_id, course_id);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -122,12 +139,18 @@ create trigger trg_weak_topics_updated_at
 before update on public.weak_topics
 for each row execute function public.set_updated_at();
 
+drop trigger if exists trg_chat_session_summaries_updated_at on public.chat_session_summaries;
+create trigger trg_chat_session_summaries_updated_at
+before update on public.chat_session_summaries
+for each row execute function public.set_updated_at();
+
 alter table public.student_profiles enable row level security;
 alter table public.courses enable row level security;
 alter table public.exams enable row level security;
 alter table public.study_tasks enable row level security;
 alter table public.quiz_scores enable row level security;
 alter table public.weak_topics enable row level security;
+alter table public.chat_session_summaries enable row level security;
 
 drop policy if exists "Students can manage own profile" on public.student_profiles;
 create policy "Students can manage own profile"
@@ -243,6 +266,28 @@ with check (
         select 1
         from public.student_profiles sp
         where sp.id = weak_topics.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+);
+
+drop policy if exists "Students can manage own chat summaries" on public.chat_session_summaries;
+create policy "Students can manage own chat summaries"
+on public.chat_session_summaries
+for all
+to authenticated
+using (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = chat_session_summaries.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+)
+with check (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = chat_session_summaries.student_id
           and sp.email = auth.jwt() ->> 'email'
     )
 );

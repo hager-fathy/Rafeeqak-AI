@@ -13,6 +13,7 @@ from src.tools.state import (
     require_active_course_message,
     touch_activity,
     update_active_course_bucket,
+    upsert_active_chat_summary,
 )
 from src.ui.theme import render_page_hero
 
@@ -34,7 +35,30 @@ def _assistant_reply(user_message: str) -> str:
             last_quiz_feedback=None,
             generated_questions=generated_questions[-120:],
         )
+    if result["agent"] == "reminder_agent" and result.get("payload", {}).get("reminders") is not None:
+        update_active_course_bucket(reminders=result["payload"]["reminders"])
     return result["response"]
+
+
+def _record_session_summary(chat_history: list[dict]) -> None:
+    context = course_context()
+    active_course = context["active_course"]
+    if active_course is None or not chat_history:
+        return
+
+    auth_user = get_authenticated_user()
+    student_email = auth_user.get("email") if auth_user else None
+    student_name = (auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None
+    result = get_memory_agent().summarize_chat_session(
+        course_id=active_course["id"],
+        course_name=active_course["name"],
+        messages=chat_history,
+        language=get_selected_language(),
+        student_email=student_email,
+        student_name=student_name,
+    )
+    if result["ok"]:
+        upsert_active_chat_summary(result["summary"])
 
 
 def render_chat_page(project_root: Path) -> None:
@@ -93,6 +117,7 @@ def render_chat_page(project_root: Path) -> None:
         if st.button(t("chat.use_prompt", language), use_container_width=True, disabled=quick_prompt is None or active_course is None):
             chat_history.append({"role": "user", "content": quick_prompt})
             chat_history.append({"role": "assistant", "content": _assistant_reply(quick_prompt)})
+            _record_session_summary(chat_history)
             update_active_course_bucket(chat_history=chat_history)
             touch_activity()
             st.rerun()
@@ -104,8 +129,17 @@ def render_chat_page(project_root: Path) -> None:
             len(current_context["study_plans"]),
             border=True,
         )
+        chat_summaries = current_context.get("chat_summaries", [])
+        if chat_summaries:
+            latest_summary = chat_summaries[-1]
+            st.markdown(f"#### {t('chat.latest_summary', language)}")
+            st.write(latest_summary.get("summary", ""))
+            if latest_summary.get("next_steps"):
+                st.caption(t("chat.next_steps", language))
+                for step in latest_summary["next_steps"][:3]:
+                    st.caption(f"- {step}")
         if st.button(t("chat.clear", language), use_container_width=True):
-            update_active_course_bucket(chat_history=[])
+            update_active_course_bucket(chat_history=[], chat_summaries=[])
             touch_activity()
             st.rerun()
 
@@ -114,6 +148,7 @@ def render_chat_page(project_root: Path) -> None:
         chat_history.append({"role": "user", "content": user_text})
         reply = _assistant_reply(user_text)
         chat_history.append({"role": "assistant", "content": reply})
+        _record_session_summary(chat_history)
         update_active_course_bucket(chat_history=chat_history)
         touch_activity()
         st.rerun()

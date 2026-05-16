@@ -56,6 +56,7 @@ class InputRouterAgent:
             "weakness",
         ],
         "memory": ["remember", "memory", "stored", "saved"],
+        "reminder": ["remind", "reminder", "notify", "notification", "alert", "missed task"],
         "study_plan": ["plan", "schedule", "study", "revise", "revision", "today", "tomorrow", "exam", "weak"],
     }
 
@@ -64,6 +65,7 @@ class InputRouterAgent:
         "course_material": ["ملف", "محاضرة", "ملاحظات", "شرح", "اشرح", "لخص", "المادة", "ملخص", "pdf"],
         "database_query": ["موعد", "مواعيد", "تقدم", "التقدم", "أنجزت", "المتبقي", "درجات", "درجة", "متوسط", "ضعفي"],
         "memory": ["تذكر", "ذاكرة", "محفوظ", "حفظت"],
+        "reminder": ["ذكرني", "تذكير", "نبهني", "تنبيه", "اشعار", "إشعار", "فاتتني"],
         "study_plan": ["خطة", "جدول", "اذاكر", "أذاكر", "مراجعة", "امتحان", "الامتحان", "اليوم", "بكرة"],
     }
 
@@ -83,6 +85,16 @@ class InputRouterAgent:
                 "language": language,
                 "confidence": 0.72,
                 "signals": [normalized],
+            }
+
+        reminder_triggers = self.ARABIC_KEYWORDS["reminder"] if language == "ar" else self.ENGLISH_KEYWORDS["reminder"]
+        if any(trigger in lowered for trigger in reminder_triggers):
+            return {
+                "message": message,
+                "intent": "reminder",
+                "language": language,
+                "confidence": 0.9,
+                "signals": [trigger for trigger in reminder_triggers if trigger in lowered],
             }
 
         for intent, keywords in keyword_map.items():

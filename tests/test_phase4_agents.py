@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from src.agents.input_router import InputRouterAgent
+from src.agents.reminder_agent import ReminderAgent
 from src.agents.study_planner import StudyPlannerAgent
 from src.agents.supervisor import SupervisorAgent
 from src.tools.semantic_cache import SemanticResponseCache
@@ -55,6 +56,44 @@ def test_input_router_handles_general_chat_without_keyword_match() -> None:
     assert routed["language"] == "en"
     assert routed["confidence"] == 0.35
     assert routed["signals"] == []
+
+
+def test_input_router_detects_reminder_intent() -> None:
+    routed = InputRouterAgent().route("Remind me to revise indexes tomorrow")
+
+    assert routed["intent"] == "reminder"
+    assert routed["language"] == "en"
+    assert routed["confidence"] == 0.9
+
+
+def test_reminder_agent_creates_plan_and_deadline_reminders() -> None:
+    plan = StudyPlannerAgent().generate(
+        {
+            "course_name": "Databases",
+            "exam_date": date.today() + timedelta(days=5),
+            "daily_hours": 2,
+            "weak_topics": ["Indexes"],
+            "other_topics": ["Transactions"],
+        }
+    )["plan"]
+
+    result = ReminderAgent().create(
+        message="create reminders for this course",
+        context={
+            "active_course_id": "db-1",
+            "active_course_name": "Databases",
+            "active_plan": plan,
+            "quiz_attempts": [],
+            "reminders": [],
+        },
+    )
+
+    reminder_types = {item["reminder_type"] for item in result["reminders"]}
+
+    assert result["ok"] is True
+    assert result["created_count"] >= 3
+    assert {"study_task", "deadline", "quiz"} <= reminder_types
+    assert all(item["course_id"] == "db-1" for item in result["reminders"])
 
 
 def test_study_planner_generates_weighted_plan() -> None:
@@ -199,3 +238,37 @@ def test_supervisor_creates_plan_and_skips_missing_memory() -> None:
     assert result["ok"] is True
     assert result["sync_result"]["ok"] is False
     assert result["trace"][-1]["agent"] == "MemoryAgent"
+
+
+def test_supervisor_runs_reminder_agent_without_cache(tmp_path) -> None:
+    plan = StudyPlannerAgent().generate(
+        {
+            "course_name": "Machine Learning",
+            "exam_date": date.today() + timedelta(days=3),
+            "daily_hours": 2,
+            "weak_topics": ["Backpropagation"],
+            "other_topics": [],
+        }
+    )["plan"]
+    supervisor = SupervisorAgent(semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"))
+
+    result = supervisor.handle_message(
+        "Remind me to review backpropagation tomorrow",
+        context={
+            "active_course_id": "ml-1",
+            "active_course_name": "Machine Learning",
+            "active_plan": plan,
+            "quiz_attempts": [],
+            "reminders": [],
+            "require_active_course": True,
+        },
+    )
+
+    agents = [step["agent"] for step in result["trace"]]
+    cache_step = next(step for step in result["trace"] if step["step"] == "cache_lookup")
+
+    assert result["agent"] == "reminder_agent"
+    assert "Reminder plan updated" in result["response"]
+    assert "ReminderAgent" in agents
+    assert cache_step["status"] == "skipped"
+    assert result["payload"]["reminders"]

@@ -10,6 +10,7 @@ from src.agents.database_query import DatabaseQueryAgent
 from src.agents.input_router import InputRouterAgent
 from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
+from src.agents.reminder_agent import ReminderAgent
 from src.agents.safety_agent import SafetyAgent
 from src.agents.study_planner import StudyPlannerAgent
 from src.localization import detect_language, normalize_language, t
@@ -28,6 +29,7 @@ class SupervisorAgent:
         quiz_generator: QuizGeneratorAgent | None = None,
         progress_evaluator: ProgressEvaluatorAgent | None = None,
         database_query: DatabaseQueryAgent | None = None,
+        reminder_agent: ReminderAgent | None = None,
         semantic_cache: SemanticResponseCache | None = None,
         safety: SafetyAgent | None = None,
     ) -> None:
@@ -37,6 +39,7 @@ class SupervisorAgent:
         self.quiz_generator = quiz_generator or QuizGeneratorAgent()
         self.progress_evaluator = progress_evaluator or ProgressEvaluatorAgent()
         self.database_query = database_query or DatabaseQueryAgent()
+        self.reminder_agent = reminder_agent or ReminderAgent()
         self.semantic_cache = semantic_cache or SemanticResponseCache()
         self.safety = safety or SafetyAgent()
 
@@ -49,6 +52,7 @@ class SupervisorAgent:
             "upload": "course_rag_agent",
             "database_query": "database_query_agent",
             "memory": "memory_agent",
+            "reminder": "reminder_agent",
             "chat": "response_agent",
         }
         return mapping.get(intent, "response_agent")
@@ -120,6 +124,7 @@ class SupervisorAgent:
             "quiz_generator_agent",
             "course_rag_agent",
             "database_query_agent",
+            "reminder_agent",
         }
         if (
             context.get("require_active_course")
@@ -149,58 +154,70 @@ class SupervisorAgent:
             }
 
         context_fingerprint = self._context_fingerprint(context)
-        cached_result = self.semantic_cache.lookup(
-            message=routed_input["message"],
-            language=routed_input["language"],
-            context_fingerprint=context_fingerprint,
-        )
-        if cached_result is not None:
+        cacheable = self._is_cacheable(selected_agent)
+        if cacheable:
+            cached_result = self.semantic_cache.lookup(
+                message=routed_input["message"],
+                language=routed_input["language"],
+                context_fingerprint=context_fingerprint,
+            )
+            if cached_result is not None:
+                trace.append(
+                    self._trace_step(
+                        "cache_lookup",
+                        "SemanticCache",
+                        "served a repeated question from the local semantic cache",
+                        "hit",
+                        {
+                            "similarity": cached_result["similarity"],
+                            "hits": cached_result["hits"],
+                        },
+                    )
+                )
+                trace.append(
+                    self._trace_step(
+                        "final_response",
+                        "ResponseAgent",
+                        "prepared cached student-facing response",
+                        "completed",
+                        {"agent": cached_result["agent"]},
+                    )
+                )
+                return {
+                    "response": cached_result["response"],
+                    "intent": cached_result["intent"],
+                    "language": routed_input["language"],
+                    "agent": cached_result["agent"],
+                    "trace": trace,
+                    "payload": {
+                        **cached_result.get("payload", {}),
+                        "cache": {
+                            "hit": True,
+                            "similarity": cached_result["similarity"],
+                            "cached_at_utc": cached_result["cached_at_utc"],
+                        },
+                    },
+                }
+
             trace.append(
                 self._trace_step(
                     "cache_lookup",
                     "SemanticCache",
-                    "served a repeated question from the local semantic cache",
-                    "hit",
-                    {
-                        "similarity": cached_result["similarity"],
-                        "hits": cached_result["hits"],
-                    },
+                    "checked local semantic cache for a reusable answer",
+                    "miss",
+                    {"context_fingerprint": context_fingerprint},
                 )
             )
+        else:
             trace.append(
                 self._trace_step(
-                    "final_response",
-                    "ResponseAgent",
-                    "prepared cached student-facing response",
-                    "completed",
-                    {"agent": cached_result["agent"]},
+                    "cache_lookup",
+                    "SemanticCache",
+                    "skipped cache for a state-changing request",
+                    "skipped",
+                    {"agent": selected_agent},
                 )
             )
-            return {
-                "response": cached_result["response"],
-                "intent": cached_result["intent"],
-                "language": routed_input["language"],
-                "agent": cached_result["agent"],
-                "trace": trace,
-                "payload": {
-                    **cached_result.get("payload", {}),
-                    "cache": {
-                        "hit": True,
-                        "similarity": cached_result["similarity"],
-                        "cached_at_utc": cached_result["cached_at_utc"],
-                    },
-                },
-            }
-
-        trace.append(
-            self._trace_step(
-                "cache_lookup",
-                "SemanticCache",
-                "checked local semantic cache for a reusable answer",
-                "miss",
-                {"context_fingerprint": context_fingerprint},
-            )
-        )
 
         agent_result = self._run_selected_agent(
             selected_agent=selected_agent,
@@ -219,15 +236,16 @@ class SupervisorAgent:
             )
         )
 
-        self.semantic_cache.store(
-            message=routed_input["message"],
-            language=routed_input["language"],
-            intent=routed_input["intent"],
-            agent=selected_agent,
-            response=agent_result["response"],
-            payload=agent_result.get("payload", {}),
-            context_fingerprint=context_fingerprint,
-        )
+        if cacheable:
+            self.semantic_cache.store(
+                message=routed_input["message"],
+                language=routed_input["language"],
+                intent=routed_input["intent"],
+                agent=selected_agent,
+                response=agent_result["response"],
+                payload=agent_result.get("payload", {}),
+                context_fingerprint=context_fingerprint,
+            )
 
         return {
             "response": agent_result["response"],
@@ -326,6 +344,8 @@ class SupervisorAgent:
             return self._run_course_rag(routed_input=routed_input, context=context)
         if selected_agent == "database_query_agent":
             return self._run_database_query(routed_input=routed_input, context=context, memory_agent=memory_agent)
+        if selected_agent == "reminder_agent":
+            return self._run_reminder_agent(routed_input=routed_input, context=context)
         if selected_agent == "memory_agent":
             return self._run_memory_agent(routed_input=routed_input, memory_agent=memory_agent)
         return self._run_response_agent(routed_input=routed_input, context=context)
@@ -490,6 +510,29 @@ class SupervisorAgent:
             ],
         }
 
+    def _run_reminder_agent(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        reminder_result = self.reminder_agent.create(
+            message=routed_input["message"],
+            context=context,
+            language=routed_input["language"],
+        )
+        return {
+            "response": reminder_result["response"],
+            "payload": reminder_result,
+            "trace_steps": [
+                self._trace_step(
+                    "run_agent",
+                    "ReminderAgent",
+                    "created course-scoped reminder records",
+                    "completed" if reminder_result["ok"] else reminder_result["status"],
+                    {
+                        "created_count": reminder_result["created_count"],
+                        "total_reminders": len(reminder_result["reminders"]),
+                    },
+                )
+            ],
+        }
+
     def _run_response_agent(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         has_active_plan = context.get("active_plan") is not None
         response_key = "agent.response.ready" if has_active_plan else "agent.response.no_plan"
@@ -559,9 +602,13 @@ class SupervisorAgent:
             "quiz_attempts": len(quiz_attempts),
             "last_quiz_time": quiz_attempts[-1].get("timestamp_utc") if quiz_attempts else None,
             "uploads": len(uploads),
+            "reminders": len(context.get("reminders", []) or []),
         }
         encoded = json.dumps(fingerprint_data, sort_keys=True, default=str)
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+    def _is_cacheable(self, selected_agent: str) -> bool:
+        return selected_agent not in {"quiz_generator_agent", "reminder_agent"}
 
     def _trace_step(
         self,

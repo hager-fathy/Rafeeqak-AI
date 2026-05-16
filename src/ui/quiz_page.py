@@ -62,6 +62,7 @@ def render_quiz_page(project_root: Path) -> None:
     if course_warning:
         st.info(course_warning)
 
+    generated_quiz_for_render: dict[str, Any] | None = None
     setup_col, history_col = st.columns([1.6, 1], gap="large")
 
     with setup_col:
@@ -123,36 +124,30 @@ def render_quiz_page(project_root: Path) -> None:
             quiz_language = detect_language(topic)
             if quiz_language != "ar":
                 quiz_language = language
-            indexer.index_all(course_id=course_id, course_name=course_name)
-            context_matches = indexer.search(
-                topic,
-                top_k=min(max(int(question_count), 3), 8),
-                course_id=course_id,
-            )
-            context_chunks = [
-                {
-                    "source_name": match.source_name,
-                    "section": match.section,
-                    "chunk_index": match.chunk_index,
-                    "course_name": course_name,
-                    "text": match.text,
-                    "score": match.score,
-                }
-                for match in context_matches
-            ]
-            quiz_result = quiz_generator.generate(
+            generation_result = generate_quiz_from_course_materials(
+                indexer=indexer,
+                quiz_generator=quiz_generator,
                 topic=topic,
                 count=question_count,
-                context_chunks=context_chunks,
                 language=quiz_language,
                 difficulty=difficulty,
                 question_types=question_types,
                 previous_questions=current_context.get("generated_questions", []),
+                course_id=course_id,
+                course_name=course_name,
             )
+            if not generation_result["ok"]:
+                update_active_course_bucket(current_quiz=None, last_quiz_feedback=None)
+                st.warning(t(f"quiz.{generation_result['reason']}", language))
+                return
+
+            quiz_result = generation_result["quiz_result"]
+            context_chunks = generation_result["context_chunks"]
+            generated_quiz_for_render = quiz_result["quiz"]
             generated_questions = current_context.get("generated_questions", [])
             generated_questions.extend(question["question"] for question in quiz_result["questions"])
             update_active_course_bucket(
-                current_quiz=quiz_result["quiz"],
+                current_quiz=generated_quiz_for_render,
                 last_quiz_feedback=None,
                 generated_questions=generated_questions[-120:],
             )
@@ -160,7 +155,7 @@ def render_quiz_page(project_root: Path) -> None:
             source_note = t("quiz.source_note", language, count=len(context_chunks)) if context_chunks else ""
             st.success(t("quiz.generated", language, source_note=source_note))
 
-    quiz = _current_quiz()
+    quiz = _current_quiz(fallback=generated_quiz_for_render)
     if not quiz:
         st.info(t("quiz.no_quiz", language))
         return
@@ -331,11 +326,76 @@ def _render_attempt_history(attempts: list[dict[str, Any]], language: str) -> No
         st.dataframe(history_df, use_container_width=True, hide_index=True)
 
 
-def _current_quiz() -> dict[str, Any] | None:
+def _current_quiz(*, fallback: dict[str, Any] | None = None) -> dict[str, Any] | None:
     quiz = course_context().get("current_quiz")
     if isinstance(quiz, list):
         return {"topic": "Legacy quiz", "language": "en", "questions": quiz, "flashcards": [], "source_count": 0}
-    return quiz if isinstance(quiz, dict) else None
+    return quiz if isinstance(quiz, dict) else fallback
+
+
+def generate_quiz_from_course_materials(
+    *,
+    indexer: CourseMaterialIndexer,
+    quiz_generator: QuizGeneratorAgent,
+    topic: str,
+    count: int,
+    language: str,
+    difficulty: str,
+    question_types: list[str],
+    previous_questions: list[str],
+    course_id: str | None,
+    course_name: str | None,
+) -> dict[str, Any]:
+    indexer.index_all(course_id=course_id, course_name=course_name)
+    stats = indexer.stats(course_id=course_id)
+    if stats["chunks"] == 0:
+        return {"ok": False, "reason": "materials_required", "stats": stats}
+
+    context_matches = indexer.search(
+        topic,
+        top_k=min(max(int(count), 3), 8),
+        course_id=course_id,
+    )
+    context_chunks = [
+        {
+            "source_name": match.source_name,
+            "section": match.section,
+            "chunk_index": match.chunk_index,
+            "course_name": course_name,
+            "text": match.text,
+            "score": match.score,
+        }
+        for match in context_matches
+    ]
+    if not context_chunks:
+        return {"ok": False, "reason": "material_match_required", "stats": stats, "context_chunks": []}
+
+    quiz_result = quiz_generator.generate(
+        topic=topic,
+        count=count,
+        context_chunks=context_chunks,
+        language=language,
+        difficulty=difficulty,
+        question_types=question_types,
+        previous_questions=previous_questions,
+    )
+    quiz = quiz_result.get("quiz")
+    questions = quiz_result.get("questions") or (quiz.get("questions", []) if isinstance(quiz, dict) else [])
+    if not quiz_result.get("ok") or not isinstance(quiz, dict) or not questions:
+        return {
+            "ok": False,
+            "reason": "generation_failed",
+            "stats": stats,
+            "context_chunks": context_chunks,
+            "quiz_result": quiz_result,
+        }
+
+    return {
+        "ok": True,
+        "stats": stats,
+        "context_chunks": context_chunks,
+        "quiz_result": quiz_result,
+    }
 
 
 def _default_topic(active_plan: dict[str, Any] | None) -> str:

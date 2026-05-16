@@ -17,6 +17,8 @@ def render_dashboard_page(project_root: Path) -> None:
     study_plans = current_context.get("study_plans", [])
     quiz_attempts = current_context.get("quiz_attempts", [])
     uploads = current_context.get("uploads", [])
+    chat_summaries = current_context.get("chat_summaries", [])
+    reminders = current_context.get("reminders", [])
     indexer = CourseMaterialIndexer(
         uploads_dir=project_root / "data" / "uploads",
         vector_store_dir=project_root / "data" / "vector_store",
@@ -42,6 +44,8 @@ def render_dashboard_page(project_root: Path) -> None:
             t("quiz.rag_chip", language, count=retrieval_stats["chunks"]),
             t("dashboard.cache_chip", language, count=cache_stats["entries"]),
             t("dashboard.quiz_avg_chip", language, score=average_quiz),
+            f"{t('dashboard.chat_summaries', language)}: {len(chat_summaries)}",
+            f"{t('dashboard.reminders', language)}: {len(reminders)}",
         ],
         accent_chip=t("dashboard.accent", language),
         language=language,
@@ -86,6 +90,26 @@ def render_dashboard_page(project_root: Path) -> None:
         )
     else:
         st.info(t("dashboard.no_plan", language))
+
+    st.markdown(f"### {t('dashboard.upcoming_reminders', language)}")
+    pending_reminders = [item for item in reminders if item.get("status") != "done"]
+    if pending_reminders:
+        reminder_df = pd.DataFrame(pending_reminders)
+        visible_columns = [
+            column
+            for column in ["title", "reminder_type", "due_at", "status", "source"]
+            if column in reminder_df.columns
+        ]
+        st.dataframe(reminder_df[visible_columns], use_container_width=True, hide_index=True)
+    else:
+        st.info(t("dashboard.no_reminders", language))
+
+    if chat_summaries:
+        with st.expander(t("chat.latest_summary", language), expanded=False):
+            latest_summary = chat_summaries[-1]
+            st.write(latest_summary.get("summary", ""))
+            if latest_summary.get("main_topics"):
+                st.caption(", ".join(latest_summary["main_topics"]))
 
     with st.expander(t("dashboard.snapshot", language), expanded=False):
         if not memory_status["enabled"]:

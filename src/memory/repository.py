@@ -234,6 +234,39 @@ class SupabaseMemoryRepository:
         except Exception as exc:  # pragma: no cover - depends on external DB
             raise MemoryRepositoryError(f"Failed to upsert weak topic: {exc}") from exc
 
+    def upsert_chat_summary(
+        self,
+        *,
+        student_id: str,
+        course_id: str | None,
+        summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._ensure_available()
+
+        payload = {
+            "student_id": student_id,
+            "course_id": course_id,
+            "session_key": str(summary.get("summary_id") or "active_session"),
+            "language": summary.get("language") or "en",
+            "message_count": int(summary.get("message_count") or 0),
+            "main_topics": summary.get("main_topics") or [],
+            "weaknesses": summary.get("weaknesses") or [],
+            "next_steps": summary.get("next_steps") or [],
+            "summary": summary.get("summary") or "",
+            "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
+        }
+
+        try:
+            result = self.client.table("chat_session_summaries").upsert(
+                payload,
+                on_conflict="student_id,course_id,session_key",
+            ).execute()
+            if not result.data:
+                raise MemoryRepositoryError("Could not read back chat summary row.")
+            return result.data[0] if isinstance(result.data, list) else result.data
+        except Exception as exc:  # pragma: no cover - depends on external DB
+            raise MemoryRepositoryError(f"Failed to upsert chat summary: {exc}") from exc
+
     def fetch_student_snapshot(self, *, student_id: str) -> dict[str, Any]:
         self._ensure_available()
 
@@ -268,12 +301,23 @@ class SupabaseMemoryRepository:
                 .data
                 or []
             )
+            chat_summaries = (
+                self.client.table("chat_session_summaries")
+                .select("*")
+                .eq("student_id", student_id)
+                .order("updated_at", desc=True)
+                .limit(10)
+                .execute()
+                .data
+                or []
+            )
             return {
                 "profile": profile,
                 "courses": courses,
                 "exams": exams,
                 "weak_topics": weak_topics,
                 "recent_quizzes": recent_quizzes,
+                "chat_summaries": chat_summaries,
             }
         except Exception as exc:  # pragma: no cover - depends on external DB
             raise MemoryRepositoryError(f"Failed to fetch student snapshot: {exc}") from exc

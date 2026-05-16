@@ -1,7 +1,9 @@
 from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
 from src.agents.supervisor import SupervisorAgent
+from src.retrieval import CourseMaterialIndexer
 from src.tools.semantic_cache import SemanticResponseCache
+from src.ui.quiz_page import _current_quiz, generate_quiz_from_course_materials
 
 
 class FakeQuizLLM:
@@ -152,6 +154,97 @@ def test_quiz_generator_deduplicates_context_chunks() -> None:
 
     assert result["quiz"]["source_count"] == 1
     assert result["questions"][0]["source"] == "soc.pdf (page 1)"
+
+
+def test_quiz_page_requires_uploaded_materials(tmp_path) -> None:
+    indexer = CourseMaterialIndexer(
+        uploads_dir=tmp_path / "uploads",
+        vector_store_dir=tmp_path / "vector_store",
+    )
+
+    result = generate_quiz_from_course_materials(
+        indexer=indexer,
+        quiz_generator=QuizGeneratorAgent(),
+        topic="information retrieval",
+        count=4,
+        language="en",
+        difficulty="medium",
+        question_types=["mcq"],
+        previous_questions=[],
+        course_id="ir-1",
+        course_name="Information Retrieval",
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "materials_required"
+
+
+def test_quiz_page_generates_only_from_matching_uploaded_materials(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    course_dir = uploads_dir / "ir-1"
+    course_dir.mkdir(parents=True)
+    (course_dir / "ir_notes.txt").write_text(
+        "Information retrieval uses inverted indexes to map terms to documents for efficient search.",
+        encoding="utf-8",
+    )
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=tmp_path / "vector_store")
+
+    result = generate_quiz_from_course_materials(
+        indexer=indexer,
+        quiz_generator=QuizGeneratorAgent(),
+        topic="inverted indexes",
+        count=3,
+        language="en",
+        difficulty="medium",
+        question_types=["mcq"],
+        previous_questions=[],
+        course_id="ir-1",
+        course_name="Information Retrieval",
+    )
+
+    assert result["ok"] is True
+    assert result["context_chunks"]
+    assert result["quiz_result"]["quiz"]["source_count"] >= 1
+    assert result["quiz_result"]["questions"][0]["source"] == "ir_notes.txt (text)"
+
+
+def test_quiz_page_rejects_topics_not_found_in_uploaded_materials(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    course_dir = uploads_dir / "ir-1"
+    course_dir.mkdir(parents=True)
+    (course_dir / "ir_notes.txt").write_text(
+        "Information retrieval uses inverted indexes and ranking models.",
+        encoding="utf-8",
+    )
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=tmp_path / "vector_store")
+
+    result = generate_quiz_from_course_materials(
+        indexer=indexer,
+        quiz_generator=QuizGeneratorAgent(),
+        topic="neural backpropagation",
+        count=3,
+        language="en",
+        difficulty="medium",
+        question_types=["mcq"],
+        previous_questions=[],
+        course_id="ir-1",
+        course_name="Information Retrieval",
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "material_match_required"
+
+
+def test_current_quiz_uses_fresh_generation_fallback() -> None:
+    fallback = {
+        "topic": "inverted indexes",
+        "language": "en",
+        "questions": [{"question": "What is an inverted index?", "options": ["A"], "answer_index": 0}],
+        "flashcards": [],
+        "source_count": 1,
+    }
+
+    assert _current_quiz(fallback=fallback) == fallback
 
 
 def test_progress_evaluator_scores_answers_and_flags_weak_topic() -> None:

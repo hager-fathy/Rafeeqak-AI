@@ -83,18 +83,20 @@ smart-study-planner/
   - Quiz
   - Progress Dashboard
   - Account (logout)
-- Course-scoped session state for chat history, plans, route traces, quiz attempts, and uploads
+- Course-scoped session state for chat history, chat summaries, plans, route traces, quiz attempts, and uploads
 - Local file upload storage in `data/uploads`
 - Supabase memory sync for:
   - student profile (per logged-in user)
   - courses and exams
   - generated study tasks
   - quiz scores and weak topics
+  - per-course chat/session summaries
 - Phase 4 agent flow:
   - Safety Agent screens unsafe routing attempts
   - Input Router Agent detects intent and language
   - Supervisor Agent selects and runs the specialist agent
   - Study Planner Agent creates plans and recommends next tasks
+  - Reminder Agent creates course-scoped reminders from study tasks, quizzes, weak topics, missed tasks, and deadlines
   - Memory Agent syncs plans and quiz attempts when Supabase is configured
   - Route traces are saved in session state and shown in Chat/Dashboard
 - Phase 5 RAG flow:

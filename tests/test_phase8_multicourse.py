@@ -25,23 +25,33 @@ def test_multi_course_state_is_separated() -> None:
     math = add_course("Math")
     update_active_course_bucket(
         chat_history=[{"role": "user", "content": "math chat"}],
+        chat_summaries=[{"summary_id": "active_session", "summary": "math summary"}],
+        reminders=[{"reminder_id": "math-reminder", "title": "study limits"}],
         quiz_attempts=[{"score_percent": 80, "weak_topics": ["limits"]}],
     )
 
     physics = add_course("Physics")
     update_active_course_bucket(
         chat_history=[{"role": "user", "content": "physics chat"}],
+        chat_summaries=[{"summary_id": "active_session", "summary": "physics summary"}],
+        reminders=[{"reminder_id": "physics-reminder", "title": "study waves"}],
         quiz_attempts=[{"score_percent": 60, "weak_topics": ["waves"]}],
     )
 
     assert course_context()["chat_history"][0]["content"] == "physics chat"
+    assert course_context()["chat_summaries"][0]["summary"] == "physics summary"
+    assert course_context()["reminders"][0]["title"] == "study waves"
     assert course_context()["quiz_attempts"][0]["weak_topics"] == ["waves"]
     assert course_context()["all_courses"][1]["average_score"] == 60
 
     set_active_course(math["id"])
     assert course_context()["chat_history"][0]["content"] == "math chat"
+    assert course_context()["chat_summaries"][0]["summary"] == "math summary"
+    assert course_context()["reminders"][0]["title"] == "study limits"
     assert course_context()["quiz_attempts"][0]["weak_topics"] == ["limits"]
     assert course_context()["all_courses"][0]["average_score"] == 80
+    assert course_context()["all_courses"][0]["chat_summaries"] == 1
+    assert course_context()["all_courses"][0]["reminders"] == 1
 
     set_active_course(physics["id"])
     assert course_context()["chat_history"][0]["content"] == "physics chat"
@@ -113,6 +123,8 @@ def test_workspace_persists_for_same_email(tmp_path, monkeypatch) -> None:
     course = add_course("Data Mining")
     update_active_course_bucket(
         chat_history=[{"role": "user", "content": "what is clustering?"}],
+        chat_summaries=[{"summary_id": "active_session", "summary": "clustering summary"}],
+        reminders=[{"reminder_id": "cluster-reminder", "title": "review clustering"}],
         uploads=[{"course_id": course["id"], "stored_name": "notes.txt"}],
         active_plan={"course_name": "Data Mining", "tasks": [], "weak_topics": ["k-means"]},
     )
@@ -124,6 +136,8 @@ def test_workspace_persists_for_same_email(tmp_path, monkeypatch) -> None:
     assert get_active_course()["name"] == "Data Mining"
     restored = course_context()
     assert restored["chat_history"][0]["content"] == "what is clustering?"
+    assert restored["chat_summaries"][0]["summary"] == "clustering summary"
+    assert restored["reminders"][0]["title"] == "review clustering"
     assert restored["uploads"][0]["stored_name"] == "notes.txt"
     assert restored["active_plan"]["weak_topics"] == ["k-means"]
 
