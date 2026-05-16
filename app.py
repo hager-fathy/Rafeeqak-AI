@@ -7,12 +7,12 @@ from src.config import PROJECT_ROOT, load_project_env
 load_project_env()
 
 from src.auth import AuthService
+from src.auth.session_persistence import restore_authenticated_session
 from src.localization import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, t
 from src.retrieval import CourseMaterialIndexer
 from src.tools.llm_client import LLMSettings, get_llm_settings, log_gemini_key_status
 from src.tools.state import (
     add_course,
-    clear_authenticated_user,
     course_context,
     delete_course,
     get_active_course,
@@ -21,10 +21,8 @@ from src.tools.state import (
     get_memory_agent,
     get_selected_language,
     init_state,
-    is_authenticated,
     mark_language_profile_loaded,
     rename_course,
-    set_authenticated_user,
     set_active_course,
     set_selected_language,
     should_load_language_from_profile,
@@ -82,23 +80,7 @@ def main() -> None:
     memory_agent = get_memory_agent()
     auth_service = AuthService()
 
-    # Restore auth session tokens on rerun if available.
-    if auth_service.is_available and not is_authenticated():
-        access_token = st.session_state.get("auth_access_token")
-        refresh_token = st.session_state.get("auth_refresh_token")
-        if access_token and refresh_token:
-            restored = auth_service.restore_session(
-                access_token=access_token,
-                refresh_token=refresh_token,
-            )
-            if restored["ok"] and restored.get("user"):
-                set_authenticated_user(
-                    user=restored["user"],
-                    access_token=access_token,
-                    refresh_token=refresh_token,
-                )
-            elif not restored["ok"]:
-                clear_authenticated_user()
+    restore_authenticated_session(auth_service)
 
     user = get_authenticated_user()
     if user:

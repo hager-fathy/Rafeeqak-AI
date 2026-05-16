@@ -10,6 +10,7 @@ import streamlit as st
 
 from src.agents.memory_agent import MemoryAgent
 from src.agents.supervisor import SupervisorAgent
+from src.auth.session_persistence import clear_persisted_tokens, persist_tokens
 from src.config import load_project_env
 from src.localization import normalize_language, t
 from src.tools.quiz_history import QUIZ_HISTORY_VERSION
@@ -546,6 +547,7 @@ def set_authenticated_user(
     st.session_state["auth_user"] = user
     st.session_state["auth_access_token"] = access_token
     st.session_state["auth_refresh_token"] = refresh_token
+    persist_tokens(access_token, refresh_token)
     load_user_workspace(user)
 
 
@@ -556,6 +558,7 @@ def clear_authenticated_user() -> None:
     st.session_state["auth_refresh_token"] = None
     st.session_state["language_profile_loaded"] = False
     st.session_state["workspace_loaded_for"] = None
+    clear_persisted_tokens()
 
 
 def get_authenticated_user() -> dict | None:
