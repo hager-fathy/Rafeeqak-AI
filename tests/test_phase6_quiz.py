@@ -4,6 +4,12 @@ from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
 from src.agents.supervisor import SupervisorAgent
 from src.retrieval import CourseMaterialIndexer
+from src.tools.quiz_history import (
+    append_quiz_history,
+    normalize_question_text,
+    quiz_history_avoid_questions,
+    quiz_history_scope,
+)
 from src.tools.semantic_cache import SemanticResponseCache
 from src.tools.state import add_course, course_context, init_state, _normalize_course_bucket
 from src.ui.quiz_page import (
@@ -135,6 +141,38 @@ def test_quiz_generator_supports_difficulty_types_and_repeat_avoidance() -> None
     assert not set(previous) & {question["question"] for question in second["questions"]}
 
 
+def test_quiz_generator_normalizes_variant_suffixes_for_duplicate_prevention() -> None:
+    agent = QuizGeneratorAgent()
+    first = agent.generate(topic="Backpropagation", count=1)
+    first_question = first["questions"][0]["question"]
+    second = agent.generate(
+        topic="Backpropagation",
+        count=1,
+        avoid_questions=[f"  {first_question.upper()}   (variant 1)"],
+    )
+
+    assert normalize_question_text(first_question) not in {
+        normalize_question_text(question["question"]) for question in second["questions"]
+    }
+    assert all("(variant" not in question["question"].lower() for question in second["questions"])
+
+
+def test_quiz_history_is_scoped_by_course_and_topic() -> None:
+    history = append_quiz_history(
+        {},
+        course_id="course-a",
+        topic="Lecture 1",
+        questions=[{"question": "What is indexing?"}],
+    )
+
+    assert quiz_history_scope("course-a", "Lecture 1") in history["scopes"]
+    assert quiz_history_avoid_questions(history, course_id="course-a", topic="Lecture 1") == [
+        "What is indexing?"
+    ]
+    assert quiz_history_avoid_questions(history, course_id="course-a", topic="Lecture 2") == []
+    assert quiz_history_avoid_questions(history, course_id="course-b", topic="Lecture 1") == []
+
+
 def test_quiz_generator_uses_llm_when_available() -> None:
     result = QuizGeneratorAgent(llm_client=FakeQuizLLM()).generate(topic="Backpropagation", count=2)
 
@@ -230,6 +268,39 @@ def test_quiz_page_generates_only_from_matching_uploaded_materials(tmp_path) -> 
     assert result["quiz_result"]["questions"][0]["source"] == "ir_notes.txt (text)"
 
 
+def test_quiz_page_generates_from_selected_uploaded_file(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    course_dir = uploads_dir / "ir-1"
+    course_dir.mkdir(parents=True)
+    (course_dir / "search_notes.txt").write_text(
+        "Search engines use inverted indexes to retrieve documents quickly.",
+        encoding="utf-8",
+    )
+    (course_dir / "ranking_notes.txt").write_text(
+        "Ranking models score documents according to relevance signals.",
+        encoding="utf-8",
+    )
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=tmp_path / "vector_store")
+
+    result = generate_quiz_from_course_materials(
+        indexer=indexer,
+        quiz_generator=QuizGeneratorAgent(),
+        topic="ranking notes",
+        count=2,
+        language="en",
+        difficulty="medium",
+        question_types=["mcq"],
+        avoid_questions=[],
+        course_id="ir-1",
+        course_name="Information Retrieval",
+        source_name="ranking_notes.txt",
+    )
+
+    assert result["ok"] is True
+    assert {chunk["source_name"] for chunk in result["context_chunks"]} == {"ranking_notes.txt"}
+    assert all(question["source"].startswith("ranking_notes.txt") for question in result["quiz_result"]["questions"])
+
+
 def test_quiz_page_rejects_topics_not_found_in_uploaded_materials(tmp_path) -> None:
     uploads_dir = tmp_path / "uploads"
     course_dir = uploads_dir / "ir-1"
@@ -309,6 +380,13 @@ def test_generated_quiz_is_saved_as_active_quiz_without_counting_attempt() -> No
     assert active_quiz["requested_count"] == 2
     assert active_quiz["source_count"] == 1
     assert context["quiz_generation_status"]["status"] == "generated"
+    assert quiz_history_avoid_questions(
+        context["generated_questions"],
+        course_id=course["id"],
+        topic="inverted indexes",
+    )
+    stored_scope = context["generated_questions"]["scopes"][quiz_history_scope(course["id"], "inverted indexes")]
+    assert stored_scope["questions"][0]["normalized"] == normalize_question_text(quiz_result["questions"][0]["question"])
 
 
 def test_record_attempt_updates_course_attempts_average_and_weak_topics(monkeypatch) -> None:

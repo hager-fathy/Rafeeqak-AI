@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-from dotenv import load_dotenv
+from src.config import load_project_env
 
 try:
     import httpx
@@ -20,7 +20,7 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover - handled by runt
             self.httpx_client = httpx_client
 
 
-load_dotenv()
+load_project_env()
 
 
 PLACEHOLDER_VALUES = {"", "replace_me", "your_supabase_project_url", "your_supabase_publishable_key"}

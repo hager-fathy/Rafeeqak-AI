@@ -95,6 +95,7 @@ def test_required_phase10_templates_render() -> None:
         "difficulty": "medium",
         "number_of_questions": 3,
         "question_types": "mcq",
+        "avoid_questions": "None.",
         "score": "70%",
         "weak_topics": "gradients",
         "recommendations": "practice chain rule",
@@ -154,6 +155,7 @@ def test_quiz_and_study_planner_use_prompt_templates() -> None:
     assert quiz["generation_mode"] == "llm"
     assert "Question types: mcq" in quiz_llm.calls[0]["user_prompt"]
     assert "Machine Learning" in quiz_llm.calls[0]["user_prompt"]
+    assert "Previous questions to avoid" in quiz_llm.calls[0]["user_prompt"]
 
     plan_llm = CapturingPlanLLM()
     plan = StudyPlannerAgent(llm_client=plan_llm).generate(

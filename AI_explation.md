@@ -14,7 +14,7 @@ The wrapper supports:
 
 | Provider | Environment variable | Default model |
 |---|---|---|
-| Gemini | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.5-flash` |
+| Gemini | `GEMINI_API_KEY` | `gemini-3.1-flash-lite-preview` |
 | Offline fallback | no key needed | Python templates/rules |
 
 If `GEMINI_API_KEY` is configured, the app can use Gemini. If Gemini is missing, unavailable, or returns invalid output, the app still works with deterministic offline logic.
@@ -26,7 +26,7 @@ If `GEMINI_API_KEY` is configured, the app can use Gemini. If Gemini is missing,
 
 ```env
 GEMINI_API_KEY=your_real_gemini_key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.1-flash-lite-preview
 ```
 
 3. Install dependencies:
@@ -65,11 +65,11 @@ Provider settings:
 
 ```python
 def get_llm_settings() -> LLMSettings:
-    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
     return LLMSettings(
         provider="gemini",
         api_key=gemini_key,
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
     )
 ```
 
@@ -305,4 +305,4 @@ google-genai>=1.0.0
 
 ## Short Summary
 
-The app uses Gemini through `GEMINI_API_KEY` or `GOOGLE_API_KEY`. AI is used in study planning, course-material answers, and quiz generation. Prompts now live in reusable template files under `src/prompts/templates`, rendered through `src/prompts/registry.py`. The app keeps deterministic offline fallback logic so it remains stable during tests, demos, missing API-key situations, or temporary AI failures.
+The app uses Gemini through `GEMINI_API_KEY` and `GEMINI_MODEL`. AI is used in study planning, course-material answers, and quiz generation. Prompts now live in reusable template files under `src/prompts/templates`, rendered through `src/prompts/registry.py`. The app keeps deterministic offline fallback logic so it remains stable during tests, demos, missing API-key situations, or temporary AI failures.

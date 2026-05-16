@@ -15,6 +15,7 @@ from src.agents.safety_agent import SafetyAgent
 from src.agents.study_planner import StudyPlannerAgent
 from src.localization import detect_language, normalize_language, t
 from src.tools.semantic_cache import SemanticResponseCache
+from src.tools.quiz_history import quiz_history_avoid_questions
 
 
 class SupervisorAgent:
@@ -417,7 +418,11 @@ class SupervisorAgent:
             language=routed_input["language"],
             difficulty=context.get("quiz_difficulty", "medium"),
             question_types=context.get("question_types") or ["mcq"],
-            previous_questions=context.get("generated_questions") or [],
+            avoid_questions=quiz_history_avoid_questions(
+                context.get("generated_questions"),
+                course_id=context.get("active_course_id"),
+                topic=topic,
+            ),
         )
         response = t("agent.quiz.prepared", routed_input["language"], count=quiz_result["count"], topic=topic)
         return {

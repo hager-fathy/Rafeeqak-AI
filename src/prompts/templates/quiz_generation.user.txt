@@ -7,3 +7,6 @@ Number of questions: {{number_of_questions}}
 
 Course context:
 {{context}}
+
+Previous questions to avoid:
+{{avoid_questions}}

@@ -8,6 +8,7 @@ from typing import Any
 from src.localization import normalize_language, t
 from src.prompts import render_prompt
 from src.tools.llm_client import LLMClient
+from src.tools.quiz_history import normalize_question_text
 
 
 class QuizGeneratorAgent:
@@ -116,6 +117,7 @@ class QuizGeneratorAgent:
         difficulty: str = "medium",
         question_types: list[str] | None = None,
         previous_questions: list[str] | None = None,
+        avoid_questions: list[str] | None = None,
     ) -> dict[str, Any]:
         language = normalize_language(language)
         clean_topic = self._clean_topic(topic)
@@ -123,7 +125,13 @@ class QuizGeneratorAgent:
         difficulty = self._normalize_difficulty(difficulty)
         context_chunks = self._prepare_context_chunks(context_chunks or [])
         selected_types = self._normalize_question_types(question_types)
-        previous_normalized = {self._normalize_text(item) for item in previous_questions or []}
+        avoid_question_texts = [
+            str(item)
+            for item in [*(avoid_questions or []), *(previous_questions or [])]
+            if str(item or "").strip()
+        ]
+        previous_normalized = {normalize_question_text(item) for item in avoid_question_texts}
+        previous_normalized.discard("")
         rng = random.Random(
             f"{clean_topic.lower()}::{question_count}::{language}::{difficulty}::"
             f"{','.join(selected_types)}::{len(previous_normalized)}"
@@ -136,7 +144,9 @@ class QuizGeneratorAgent:
             language=language,
             difficulty=difficulty,
             question_types=selected_types,
+            avoid_questions=avoid_question_texts,
             previous_normalized=previous_normalized,
+            rng=rng,
         )
         if llm_quiz:
             questions = llm_quiz["questions"]
@@ -156,6 +166,7 @@ class QuizGeneratorAgent:
             flashcards = self._flashcards(clean_topic, context_chunks=context_chunks, language=language)
             generation_mode = "offline_template"
 
+        limited_material = len(questions) < question_count
         quiz = {
             "topic": clean_topic,
             "language": language,
@@ -166,6 +177,8 @@ class QuizGeneratorAgent:
             "source_count": len(context_chunks),
             "generated_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
             "generation_mode": generation_mode,
+            "limited_material": limited_material,
+            "requested_count": question_count,
         }
 
         return {
@@ -178,6 +191,8 @@ class QuizGeneratorAgent:
             "questions": questions,
             "flashcards": flashcards,
             "generation_mode": generation_mode,
+            "limited_material": limited_material,
+            "requested_count": question_count,
         }
 
     def infer_topic(self, message: str, *, fallback: str = "Revision") -> str:
@@ -206,13 +221,22 @@ class QuizGeneratorAgent:
     ) -> list[dict[str, Any]]:
         questions: list[dict[str, Any]] = []
         templates = self.GENERIC_ARABIC_TEMPLATES if language == "ar" else self.GENERIC_ENGLISH_TEMPLATES
-        type_index = 0
-        template_index = 0
-        attempts = 0
-        while len(questions) < count and attempts < count * 8:
-            question_type = question_types[type_index % len(question_types)]
-            template = templates[template_index % len(templates)]
-            context_chunk = context_chunks[template_index % len(context_chunks)] if context_chunks else None
+        used_normalized = set(previous_normalized)
+        candidate_normalized: set[str] = set()
+        context_options = context_chunks or [None]
+        stem_count = 4
+        max_attempts = len(question_types) * len(templates) * len(context_options) * stem_count
+        start_offset = len(previous_normalized)
+
+        for attempt in range(max_attempts):
+            if len(questions) >= count:
+                break
+            question_type = question_types[(start_offset + attempt) % len(question_types)]
+            template = templates[((start_offset // max(1, len(question_types))) + attempt) % len(templates)]
+            context_chunk = context_options[
+                ((start_offset // max(1, len(templates))) + attempt) % len(context_options)
+            ]
+            variant_index = (start_offset + attempt) % stem_count
             question = self._question_for_type(
                 question_type=question_type,
                 template=template,
@@ -222,16 +246,15 @@ class QuizGeneratorAgent:
                 language=language,
                 difficulty=difficulty,
                 context_chunk=context_chunk,
+                variant_index=variant_index,
             )
-            normalized = self._normalize_text(question["question"])
-            if normalized not in previous_normalized or attempts >= count * 4:
-                if normalized in previous_normalized:
-                    question["question"] = f"{question['question']} (variant {len(questions) + 1})"
+            normalized = normalize_question_text(question["question"])
+            if not normalized or normalized in candidate_normalized:
+                continue
+            candidate_normalized.add(normalized)
+            if normalized not in used_normalized:
                 questions.append(question)
-                previous_normalized.add(self._normalize_text(question["question"]))
-            type_index += 1
-            template_index += 1
-            attempts += 1
+                used_normalized.add(normalized)
         return questions
 
     def _question_for_type(
@@ -245,13 +268,22 @@ class QuizGeneratorAgent:
         language: str,
         difficulty: str,
         context_chunk: dict[str, Any] | None,
+        variant_index: int,
     ) -> dict[str, Any]:
         if question_type == "true_false":
-            return self._true_false_question(template, topic, question_number, rng, language, difficulty)
+            return self._true_false_question(template, topic, question_number, rng, language, difficulty, variant_index)
         if question_type == "short_answer":
-            return self._short_answer_question(template, topic, question_number, language, difficulty, context_chunk)
+            return self._short_answer_question(
+                template,
+                topic,
+                question_number,
+                language,
+                difficulty,
+                context_chunk,
+                variant_index,
+            )
         if question_type == "matching":
-            return self._matching_question(template, topic, question_number, language, difficulty)
+            return self._matching_question(template, topic, question_number, language, difficulty, variant_index)
         if context_chunk:
             return self._context_question(
                 topic=topic,
@@ -260,8 +292,17 @@ class QuizGeneratorAgent:
                 language=language,
                 rng=rng,
                 difficulty=difficulty,
+                variant_index=variant_index,
             )
-        return self._template_question(template, topic, question_number, rng, difficulty=difficulty)
+        return self._template_question(
+            template,
+            topic,
+            question_number,
+            rng,
+            difficulty=difficulty,
+            language=language,
+            variant_index=variant_index,
+        )
 
     def _true_false_question(
         self,
@@ -271,13 +312,28 @@ class QuizGeneratorAgent:
         rng: random.Random,
         language: str,
         difficulty: str,
+        variant_index: int,
     ) -> dict[str, Any]:
         use_correct = rng.choice([True, False])
         statement = template["correct"] if use_correct else template["distractors"][0]
-        question_text = (
-            f"صح أم خطأ ({difficulty}): {statement}"
-            if language == "ar"
-            else f"True or false ({difficulty}): {statement}"
+        if language == "ar":
+            stems = [
+                "صح أم خطأ ({difficulty}): {statement}",
+                "قيم العبارة ({difficulty}): {statement}",
+                "هل تدعم ملاحظات {topic} هذه العبارة؟ {statement}",
+                "مراجعة {topic} ({difficulty}): {statement}",
+            ]
+        else:
+            stems = [
+                "True or false ({difficulty}): {statement}",
+                "Evaluate this {topic} claim ({difficulty}): {statement}",
+                "Is this statement supported during {topic} revision? {statement}",
+                "Checkpoint claim for {topic} ({difficulty}): {statement}",
+            ]
+        question_text = stems[variant_index % len(stems)].format(
+            topic=topic,
+            difficulty=difficulty,
+            statement=statement,
         )
         return {
             "id": f"true-false-{question_number}",
@@ -300,19 +356,39 @@ class QuizGeneratorAgent:
         language: str,
         rng: random.Random,
         difficulty: str,
+        variant_index: int,
     ) -> dict[str, Any]:
         answer = self._best_context_sentence(context_chunk.get("text", ""), topic=topic)
         source_label = self._source_label(context_chunk)
+        concept = self._context_concept(context_chunk, topic=topic)
         if language == "ar":
-            question = f"\u0623\u064a \u0639\u0628\u0627\u0631\u0629 \u062a\u0637\u0627\u0628\u0642 \u0645\u0644\u0627\u062d\u0638\u0627\u062a\u0643 \u0639\u0646 {topic}\u061f"
+            stems = [
+                "\u0623\u064a \u0639\u0628\u0627\u0631\u0629 \u062a\u0637\u0627\u0628\u0642 {source} \u0639\u0646 {concept}\u061f",
+                "\u0645\u0627 \u0623\u0641\u0636\u0644 \u062a\u0644\u062e\u064a\u0635 \u0644\u0645\u0627 \u064a\u0642\u0648\u0644\u0647 \u0627\u0644\u0645\u0644\u0641 \u0639\u0646 {concept}\u061f",
+                "\u0623\u064a \u062e\u064a\u0627\u0631 \u0645\u062f\u0639\u0648\u0645 \u0623\u0643\u062b\u0631 \u0645\u0646 {source}\u061f",
+                "\u0628\u062d\u0633\u0628 \u0627\u0644\u0645\u0627\u062f\u0629 \u0627\u0644\u0645\u062d\u062f\u062f\u0629\u060c \u0645\u0627 \u0627\u0644\u0623\u062f\u0642 \u062d\u0648\u0644 {concept}\u061f",
+            ]
+            question = stems[variant_index % len(stems)].format(source=source_label, concept=concept, topic=topic)
             explanation = f"\u0627\u0644\u0625\u062c\u0627\u0628\u0629 \u0645\u0628\u0646\u064a\u0629 \u0639\u0644\u0649 {source_label}."
         else:
-            question = f"Which statement best matches your notes about {topic}?"
+            stems = [
+                "Which statement best matches {source} about {concept}?",
+                "What is the best summary of the selected file's note on {concept}?",
+                "Which option is most directly supported by {source}?",
+                "According to the selected material, what should you remember about {concept}?",
+            ]
+            question = stems[variant_index % len(stems)].format(source=source_label, concept=concept, topic=topic)
             explanation = f"This answer is grounded in {source_label}."
 
         options, answer_index = self._shuffle_options(
             answer,
-            self._context_distractors(topic=topic, language=language, difficulty=difficulty),
+            self._context_distractors(
+                topic=topic,
+                concept=concept,
+                answer=answer,
+                language=language,
+                difficulty=difficulty,
+            ),
             rng,
         )
         return {
@@ -335,14 +411,26 @@ class QuizGeneratorAgent:
         language: str,
         difficulty: str,
         context_chunk: dict[str, Any] | None,
+        variant_index: int,
     ) -> dict[str, Any]:
         expected = self._trim(context_chunk.get("text", ""), max_length=180) if context_chunk else template["correct"]
         keywords = self._keywords(expected, topic)
-        prompt = (
-            f"إجابة قصيرة ({difficulty}): اشرح {topic} في جملة أو جملتين."
-            if language == "ar"
-            else f"Short answer ({difficulty}): Explain {topic} in one or two sentences."
-        )
+        concept = self._context_concept(context_chunk, topic=topic) if context_chunk else self._template_focus(template)
+        if language == "ar":
+            prompts = [
+                f"إجابة قصيرة ({difficulty}): اشرح {concept} في جملة أو جملتين.",
+                f"اكتب ملخصا قصيرا عن {concept} من {topic}.",
+                f"ما الفكرة الأهم التي تربط {concept} بالموضوع؟",
+                f"أجب باختصار: كيف تستخدم {concept} في المراجعة؟",
+            ]
+        else:
+            prompts = [
+                f"Short answer ({difficulty}): Explain {concept} in one or two sentences.",
+                f"Briefly summarize how {concept} fits into {topic}.",
+                f"What is the key idea connecting {concept} to this material?",
+                f"In your own words, how would you use {concept} during revision?",
+            ]
+        prompt = prompts[variant_index % len(prompts)]
         return {
             "id": f"short-answer-{question_number}",
             "type": "short_answer",
@@ -366,21 +454,38 @@ class QuizGeneratorAgent:
         question_number: int,
         language: str,
         difficulty: str,
+        variant_index: int,
     ) -> dict[str, Any]:
+        focus = self._template_focus(template)
         if language == "ar":
             pairs = [
                 {"left": f"الفكرة الأساسية في {topic}", "right": template["correct"]},
                 {"left": f"خطأ شائع في {topic}", "right": template["distractors"][0]},
                 {"left": f"حركة تدريب في {topic}", "right": "استخدم مثالا محلولا ثم حل سؤالا جديدا."},
             ]
-            question = f"مطابقة ({difficulty}): طابق كل عبارة عن {topic} مع الوصف الأنسب."
+            stems = [
+                "مطابقة ({difficulty}): طابق كل عبارة عن {topic} مع الوصف الأنسب.",
+                "طابق مفاتيح {focus} في {topic} مع شرحها.",
+                "اختبار مطابقة: ما الدور الأنسب لكل عنصر عن {focus}؟",
+                "مراجعة {topic}: اربط المفهوم بالخطأ الشائع والتدريب.",
+            ]
         else:
             pairs = [
                 {"left": f"{topic} core idea", "right": template["correct"]},
                 {"left": f"{topic} common trap", "right": template["distractors"][0]},
                 {"left": f"{topic} practice move", "right": "Use a worked example, then solve a new question."},
             ]
-            question = f"Matching ({difficulty}): Match each {topic} prompt to the best description."
+            stems = [
+                "Matching ({difficulty}): Match each {topic} prompt to the best description.",
+                "Match the {focus} cues in {topic} to their best explanations.",
+                "Which description belongs with each {topic} revision cue about {focus}?",
+                "Pair the concept, common trap, and practice move for {topic}.",
+            ]
+        question = stems[variant_index % len(stems)].format(
+            topic=topic,
+            focus=focus,
+            difficulty=difficulty,
+        )
         return {
             "id": f"matching-{question_number}",
             "type": "matching",
@@ -403,7 +508,9 @@ class QuizGeneratorAgent:
         language: str,
         difficulty: str,
         question_types: list[str],
+        avoid_questions: list[str],
         previous_normalized: set[str],
+        rng: random.Random,
     ) -> dict[str, Any] | None:
         if not self.llm_client.is_available or question_types != ["mcq"]:
             return None
@@ -418,6 +525,7 @@ class QuizGeneratorAgent:
             source_text = "No uploaded material excerpts were retrieved. Generate from the topic only."
 
         response_language = "Arabic" if language == "ar" else "English"
+        avoid_text = self._format_avoid_questions(avoid_questions)
         prompt = render_prompt(
             "quiz_generation",
             course_name=self._course_name_from_context(context_chunks),
@@ -426,6 +534,7 @@ class QuizGeneratorAgent:
             number_of_questions=count,
             question_types=", ".join(question_types),
             context=source_text,
+            avoid_questions=avoid_text,
             language=response_language,
         )
 
@@ -447,6 +556,7 @@ class QuizGeneratorAgent:
             count=count,
             difficulty=difficulty,
             previous_normalized=previous_normalized,
+            rng=rng,
         )
         if len(questions) != count:
             return None
@@ -463,11 +573,13 @@ class QuizGeneratorAgent:
         count: int,
         difficulty: str,
         previous_normalized: set[str],
+        rng: random.Random,
     ) -> list[dict[str, Any]]:
         if not isinstance(raw_questions, list):
             return []
 
         questions = []
+        used_normalized = set(previous_normalized)
         for item in raw_questions:
             index = len(questions) + 1
             if index > count:
@@ -492,9 +604,12 @@ class QuizGeneratorAgent:
                 continue
             if len({self._normalize_text(option) for option in clean_options}) != 4:
                 continue
-            normalized_question = self._normalize_text(question_text)
-            if normalized_question in previous_normalized:
+            normalized_question = normalize_question_text(question_text)
+            if not normalized_question or normalized_question in used_normalized:
                 continue
+            correct_answer = clean_options[answer_index]
+            distractors = [option for option_index, option in enumerate(clean_options) if option_index != answer_index]
+            shuffled_options, shuffled_answer_index = self._shuffle_options(correct_answer, distractors, rng)
             questions.append(
                 {
                     "id": f"llm-{index}",
@@ -502,13 +617,13 @@ class QuizGeneratorAgent:
                     "topic": topic,
                     "difficulty": difficulty,
                     "question": question_text,
-                    "options": clean_options,
-                    "answer_index": answer_index,
+                    "options": shuffled_options,
+                    "answer_index": shuffled_answer_index,
                     "explanation": str(item.get("explanation") or "").strip(),
                     "source": str(item.get("source") or "llm").strip(),
                 }
             )
-            previous_normalized.add(normalized_question)
+            used_normalized.add(normalized_question)
         return questions
 
     def _course_name_from_context(self, context_chunks: list[dict[str, Any]]) -> str:
@@ -539,14 +654,43 @@ class QuizGeneratorAgent:
         rng: random.Random,
         *,
         difficulty: str,
+        language: str,
+        variant_index: int,
     ) -> dict[str, Any]:
-        options, answer_index = self._shuffle_options(template["correct"], template["distractors"], rng)
+        focus = self._template_focus(template)
+        distractors = self._template_distractors(
+            template,
+            topic=topic,
+            focus=focus,
+            language=language,
+            variant_index=variant_index,
+        )
+        options, answer_index = self._shuffle_options(template["correct"], distractors, rng)
+        if language == "ar":
+            stems = [
+                template["question"],
+                "أي اختيار يختبر {focus} في {topic} بشكل أفضل؟",
+                "عند مراجعة {topic} بمستوى {difficulty}، ما الخطوة المرتبطة بـ {focus}؟",
+                "ما الدليل الأقوى على فهم {focus} ضمن {topic}؟",
+            ]
+        else:
+            stems = [
+                template["question"],
+                "Which choice best checks {focus} while revising {topic}?",
+                "In a {difficulty} review of {topic}, which step supports {focus}?",
+                "What is the strongest evidence that you understand {focus} in {topic}?",
+            ]
+        question_text = stems[variant_index % len(stems)].format(
+            topic=topic,
+            focus=focus,
+            difficulty=difficulty,
+        )
         return {
             "id": f"template-{question_number}",
             "type": "mcq",
             "topic": topic,
             "difficulty": difficulty,
-            "question": template["question"].format(topic=topic),
+            "question": question_text,
             "options": options,
             "answer_index": answer_index,
             "explanation": template["explanation"],
@@ -584,7 +728,26 @@ class QuizGeneratorAgent:
         distractors: list[str],
         rng: random.Random,
     ) -> tuple[list[str], int]:
-        options = [correct, *distractors[:3]]
+        correct = str(correct or "").strip()
+        options = [correct]
+        seen = {self._normalize_text(correct)}
+        for distractor in distractors:
+            clean_distractor = str(distractor or "").strip()
+            normalized = self._normalize_text(clean_distractor)
+            if not clean_distractor or normalized in seen:
+                continue
+            options.append(clean_distractor)
+            seen.add(normalized)
+            if len(options) == 4:
+                break
+        fallback_index = 1
+        while len(options) < 4:
+            filler = f"Unsupported option {fallback_index}"
+            fallback_index += 1
+            if self._normalize_text(filler) in seen:
+                continue
+            options.append(filler)
+            seen.add(self._normalize_text(filler))
         rng.shuffle(options)
         return options, options.index(correct)
 
@@ -630,7 +793,7 @@ class QuizGeneratorAgent:
                     "text": text,
                 }
             )
-        return prepared[:8]
+        return prepared[:12]
 
     def _best_context_sentence(self, text: str, *, topic: str) -> str:
         compact = " ".join(str(text or "").split())
@@ -652,29 +815,97 @@ class QuizGeneratorAgent:
         section = str(chunk.get("section") or "section").strip()
         return f"{source} ({section})"
 
-    def _context_distractors(self, *, topic: str, language: str, difficulty: str) -> list[str]:
+    def _context_concept(self, chunk: dict[str, Any] | None, *, topic: str) -> str:
+        if not chunk:
+            return topic
+        sentence = self._best_context_sentence(chunk.get("text", ""), topic=topic)
+        topic_tokens = set(re.findall(r"[\w\u0600-\u06FF]+", topic.casefold()))
+        keywords = [
+            token
+            for token in self._keywords(sentence, topic)
+            if token.casefold() not in topic_tokens
+        ]
+        if keywords:
+            return " ".join(keywords[:3])
+        return self._trim(sentence, max_length=60) or topic
+
+    def _template_focus(self, template: dict[str, Any]) -> str:
+        keywords = self._keywords(template.get("correct", ""), "")
+        if keywords:
+            return " ".join(keywords[:3])
+        return self._trim(template.get("correct", ""), max_length=50) or "the core idea"
+
+    def _template_distractors(
+        self,
+        template: dict[str, Any],
+        *,
+        topic: str,
+        focus: str,
+        language: str,
+        variant_index: int,
+    ) -> list[str]:
+        base = [str(item) for item in template.get("distractors", []) if str(item or "").strip()]
+        if base:
+            rotation = variant_index % len(base)
+            base = base[rotation:] + base[:rotation]
+        if language == "ar":
+            specific = [
+                f"التعامل مع {focus} كعنوان فقط دون مثال من {topic}.",
+                f"اختيار إجابة تبدو مألوفة دون ربطها بالملاحظات.",
+                f"تجاهل التطبيق العملي لـ {focus} والتركيز على الشكل فقط.",
+            ]
+        else:
+            specific = [
+                f"Treat {focus} as only a label, without an example from {topic}.",
+                "Choose an answer because it sounds familiar, not because the notes support it.",
+                f"Ignore the practical use of {focus} and focus only on note formatting.",
+            ]
+        return [*specific[variant_index % len(specific) :], *specific[: variant_index % len(specific)], *base]
+
+    def _format_avoid_questions(self, avoid_questions: list[str]) -> str:
+        cleaned = []
+        for question in avoid_questions:
+            text = self._trim(question, max_length=180)
+            if text and text not in cleaned:
+                cleaned.append(text)
+            if len(cleaned) == 20:
+                break
+        if not cleaned:
+            return "None."
+        return "\n".join(f"- {question}" for question in cleaned)
+
+    def _context_distractors(
+        self,
+        *,
+        topic: str,
+        concept: str,
+        answer: str,
+        language: str,
+        difficulty: str,
+    ) -> list[str]:
+        del answer
         if language == "ar":
             if difficulty == "hard":
                 return [
-                    f"{topic} يعتمد فقط على حفظ التعريفات دون تطبيق.",
-                    f"لا توجد علاقة بين {topic} والتحليل أو حل الأسئلة.",
-                    "أفضل مراجعة هي تجاهل الأمثلة والانتقال لموضوع آخر.",
+                    f"{concept} في {topic} مجرد تسمية تحفظ دون أمثلة أو تطبيق.",
+                    f"الملف يوضح أن {concept} غير مرتبط بالتحليل أو حل الأسئلة.",
+                    f"أفضل تعامل مع {concept} هو تجاهل الشرح والانتقال لموضوع آخر.",
                 ]
             return [
-                "الملاحظات لا تحتوي على أي فكرة مرتبطة بالموضوع.",
-                "أفضل طريقة للمراجعة هي تجاهل الأمثلة بالكامل.",
-                "لا توجد حاجة لاختبار الفهم بعد القراءة.",
+                f"لا توجد أي فكرة في الملف مرتبطة بـ {concept}.",
+                f"{concept} يعني حفظ عنوان {topic} فقط.",
+                f"لا تحتاج إلى تطبيق أو اختبار فهم {concept}.",
             ]
         if difficulty == "hard":
             return [
-                f"{topic} is only about memorizing labels, not applying ideas.",
-                f"{topic} has no connection to analysis, examples, or practice.",
-                "The best revision move is to skip examples and change topics.",
+                f"{concept} in {topic} is only a label to memorize, not an idea to apply.",
+                f"The file shows {concept} has no link to analysis, examples, or practice.",
+                f"The best response to {concept} is to ignore the explanation and switch topics.",
             ]
         return [
-            "The notes do not contain any idea related to the topic.",
-            "The best revision method is to ignore examples completely.",
-            "There is no need to test understanding after reading.",
+            f"The selected file has no idea connected to {concept}.",
+            f"{concept} only means memorizing the title of {topic}.",
+            f"There is no need to apply or test {concept} after reading.",
         ]
 
     def _trim(self, text: str, *, max_length: int) -> str:
@@ -689,7 +920,7 @@ class QuizGeneratorAgent:
         return selected or ["mcq"]
 
     def _normalize_text(self, text: str) -> str:
-        return re.sub(r"\s+", " ", str(text or "").strip().lower())
+        return re.sub(r"\s+", " ", str(text or "").strip().casefold())
 
     def _keywords(self, text: str, topic: str) -> list[str]:
         tokens = re.findall(r"[\w\u0600-\u06FF]+", f"{topic} {text}".lower())

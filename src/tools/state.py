@@ -10,7 +10,9 @@ import streamlit as st
 
 from src.agents.memory_agent import MemoryAgent
 from src.agents.supervisor import SupervisorAgent
+from src.config import load_project_env
 from src.localization import normalize_language, t
+from src.tools.quiz_history import QUIZ_HISTORY_VERSION
 
 
 COURSE_SCOPED_KEYS = (
@@ -48,7 +50,7 @@ def _empty_course_bucket() -> dict:
         "quiz_generation_status": None,
         "reminders": [],
         "uploads": [],
-        "generated_questions": [],
+        "generated_questions": {"version": QUIZ_HISTORY_VERSION, "scopes": {}},
     }
 
 
@@ -717,6 +719,7 @@ def _workspace_path_for_email(email: str) -> Path:
 
 
 def _workspace_store_dir() -> Path:
+    load_project_env()
     configured = os.getenv("RAFEEQAK_USER_STATE_DIR")
     if configured:
         return Path(configured)

@@ -1,11 +1,15 @@
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import streamlit as st
+
+from src.config import PROJECT_ROOT, load_project_env
+
+load_project_env()
 
 from src.auth import AuthService
 from src.localization import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, t
 from src.retrieval import CourseMaterialIndexer
+from src.tools.llm_client import LLMSettings, get_llm_settings, log_gemini_key_status
 from src.tools.state import (
     add_course,
     clear_authenticated_user,
@@ -36,7 +40,6 @@ from src.ui.settings_page import render_settings_page
 from src.ui.theme import inject_global_styles
 from src.ui.upload_page import render_upload_page
 
-PROJECT_ROOT = Path(__file__).resolve().parent
 UPLOADS_DIR = PROJECT_ROOT / "data" / "uploads"
 VECTOR_STORE_DIR = PROJECT_ROOT / "data" / "vector_store"
 
@@ -44,6 +47,26 @@ VECTOR_STORE_DIR = PROJECT_ROOT / "data" / "vector_store"
 def ensure_directories() -> None:
     for directory in (UPLOADS_DIR, VECTOR_STORE_DIR):
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def _initialize_gemini_config() -> LLMSettings:
+    settings = get_llm_settings()
+    st.session_state["gemini_config"] = {
+        "configured": settings.is_configured,
+        "model": settings.model,
+    }
+    debug_status = (settings.is_configured, settings.model)
+    if st.session_state.get("_gemini_debug_status") != debug_status:
+        log_gemini_key_status(settings)
+        st.session_state["_gemini_debug_status"] = debug_status
+    return settings
+
+
+def _render_gemini_config_warning(settings: LLMSettings, language: str) -> None:
+    if settings.is_configured:
+        return
+    st.warning(t("llm.gemini_missing", language, model=settings.model))
+
 
 def main() -> None:
     st.set_page_config(
@@ -55,6 +78,7 @@ def main() -> None:
 
     ensure_directories()
     init_state()
+    gemini_settings = _initialize_gemini_config()
     memory_agent = get_memory_agent()
     auth_service = AuthService()
 
@@ -81,6 +105,7 @@ def main() -> None:
         _load_language_from_profile_once(memory_agent, user)
     language = get_selected_language()
     inject_global_styles(language)
+    _render_gemini_config_warning(gemini_settings, language)
 
     if user:
         pages = {

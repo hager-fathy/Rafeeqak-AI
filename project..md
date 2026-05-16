@@ -435,7 +435,7 @@ Legend:
 - [x] Store student profile, courses, exams, tasks, quiz scores, and weak topics.
 - [x] Sync generated study plans and quiz attempts when Supabase is configured.
 - [x] Upgrade memory schema and local state for full course-scoped separation.
-- [ ] Store useful per-course chat/session summaries.
+- [x] Store useful per-course chat/session summaries.
 
 ### Phase 4 - Multi-Agent Flow
 
@@ -443,8 +443,8 @@ Legend:
 - [x] Add route trace logging.
 - [x] Wire chat requests through safety, routing, specialist agents, and response generation.
 - [x] Add course-aware routing and course-required validation.
-- [ ] Ensure CAG cache check happens after routing and before expensive specialist execution.
-- [ ] Add Reminder Agent or reminder service.
+- [x] Ensure CAG cache check happens after routing and before expensive specialist execution.
+- [x] Add Reminder Agent or reminder service.
 
 ### Phase 5 - RAG System
 
@@ -515,14 +515,14 @@ Legend:
 
 - [x] Replace fixed-looking plan defaults with more adaptive task generation.
 - [x] Add LLM-based plan generation with fallback.
-- [ ] Make planning work across multiple courses.
-- [ ] Add course difficulty.
-- [ ] Ask the student how many lectures they need to study.
-- [ ] Ask the student what time period they want to finish the lectures in.
-- [ ] Ask for available study time per day when needed.
-- [ ] Consider exam deadlines, daily available time, current progress, and weak topics.
-- [ ] Prioritize weak topics first, then continue remaining topics in a logical order.
-- [ ] Add delayed-task detection and recovery recommendations.
+- [x] Make planning work across multiple courses.
+- [x] Add course difficulty.
+- [x] Ask the student how many lectures they need to study.
+- [x] Ask the student what time period they want to finish the lectures in.
+- [x] Ask for available study time per day when needed.
+- [x] Consider exam deadlines, daily available time, current progress, and weak topics.
+- [x] Prioritize weak topics first, then continue remaining topics in a logical order.
+- [x] Add delayed-task detection and recovery recommendations.
 
 ### Phase 12 - Dashboard, Settings, And Reminders
 
@@ -534,14 +534,14 @@ Legend:
 ### Phase 13 - Testing And Demo
 
 - [x] Automated tests cover app startup, page rendering, auth, memory, routing, RAG, quiz, cache, and LLM provider selection.
-- [ ] Add tests for multi-course state separation.
-- [ ] Add tests for course selector gating.
-- [ ] Add tests for Arabic localization and RTL.
-- [ ] Add tests for course-scoped RAG retrieval.
+- [x] Add tests for multi-course state separation.
+- [x] Add tests for course selector gating.
+- [x] Add tests for Arabic localization and RTL.
+- [x] Add tests for course-scoped RAG retrieval.
 - [x] Add tests for vague RAG query clarification and no raw chunk dumping.
-- [ ] Add tests for quiz question types and partial scoring.
+- [x] Add tests for quiz question types and partial scoring.
 - [x] Add tests for quiz loading/failure/retry states.
-- [ ] Add tests for chat/session summary quality.
+- [x] Add tests for chat/session summary quality.
 - [x] Add tests for reminder creation.
 - [ ] Prepare final demo script.
 - [ ] Run end-to-end manual demo validation.
@@ -567,7 +567,7 @@ Legend:
 | Gemini LLM wrapper | Complete |
 | Upload deletion | Complete |
 | Custom quiz count | Complete |
-| Adaptive study plan generation | Partial/Improved |
+| Adaptive study plan generation | Complete |
 
 ### Main Pending Upgrade
 
@@ -581,10 +581,10 @@ Legend:
 | Reusable prompt templates | Complete |
 | Multiple quiz question types | Complete |
 | Partial scoring for text answers | Complete |
-| Better chat/session summaries | Pending |
+| Better chat/session summaries | Partial - local summaries complete |
 | Vague RAG query clarification and no raw chunk dumping | Complete |
-| Study planner input collection | Pending |
-| Weak-topic-first planning | Pending |
+| Study planner input collection | Complete |
+| Weak-topic-first planning | Complete |
 | Quiz loading/failure/retry states | Complete |
 | Notifications/reminders | Complete |
 | Settings page | Complete |
@@ -637,6 +637,6 @@ Note: langchain and langgraph are installed but not currently used in the implem
 
 ## 13. Final Summary
 
-Rafeeqak already has a strong single-course demo core: authentication, planning, uploads, RAG, quizzes, weak-topic tracking, semantic cache, structured queries, and LLM integration.
+Rafeeqak now has a strong multi-course demo core: authentication, planning, uploads, RAG, quizzes, weak-topic tracking, semantic cache, structured queries, reminders, settings, dashboards, localization, and Gemini integration with offline fallback.
 
-The next major goal is to keep turning this into a true multi-course study assistant. The most important upgrade is course scoping: every material, chat message, quiz, weak topic, progress metric, study plan, summary, and reminder must belong to a selected course. After that, better chat/session summaries, improved RAG responses, study-planning input collection, weak-topic-first planning, quiz status feedback, dashboard summaries, settings, and reminders will make the project feel complete and polished.
+The remaining documented gaps are mainly prompt-template extensions for chat/session summaries and reminder generation, plus final demo validation work. Course scoping, study-planning inputs, weak-topic-first planning, quiz status feedback, dashboard summaries, settings, and reminders are implemented and covered by focused tests.

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from src.config import DEFAULT_GEMINI_MODEL, load_project_env
 
 try:
     from google import genai
@@ -16,10 +18,8 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover - optional runtim
     genai_types = None  # type: ignore[assignment]
 
 
-load_dotenv()
-
-
 PLACEHOLDER_KEYS = {"", "your_gemini_api_key_here", "replace_me"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -29,17 +29,30 @@ class LLMSettings:
     model: str
 
     @property
+    def has_api_key(self) -> bool:
+        return bool(self.api_key and self.api_key.strip())
+
+    @property
     def is_configured(self) -> bool:
-        return bool(self.api_key and self.api_key.strip() not in PLACEHOLDER_KEYS)
+        api_key = (self.api_key or "").strip()
+        return bool(api_key and api_key.casefold() not in PLACEHOLDER_KEYS)
 
 
-def get_llm_settings() -> LLMSettings:
-    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+def get_llm_settings(*, env_path: Path | str | None = None, override_env: bool = False) -> LLMSettings:
+    load_project_env(env_path=env_path, override=override_env)
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    gemini_model = (os.getenv("GEMINI_MODEL") or "").strip() or DEFAULT_GEMINI_MODEL
     return LLMSettings(
         provider="gemini",
         api_key=gemini_key,
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        model=gemini_model,
     )
+
+
+def log_gemini_key_status(settings: LLMSettings) -> None:
+    message = f"Gemini key loaded: {settings.is_configured}"
+    logger.info(message)
+    print(message)
 
 
 class LLMClient:

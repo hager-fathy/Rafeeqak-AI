@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
 from src.localization import detect_language, t
 from src.retrieval import CourseMaterialIndexer
+from src.tools.quiz_history import append_quiz_history, quiz_history_avoid_questions
 from src.tools.state import (
     course_context,
     get_active_course,
@@ -34,12 +36,15 @@ def render_quiz_page(project_root: Path) -> None:
     current_context = course_context()
     user_settings = get_user_settings()
     active_plan = current_context.get("active_plan")
-    default_topic = _default_topic(active_plan)
     course_id = active_course["id"] if active_course else None
     course_name = active_course["name"] if active_course else None
 
+    root_uploads_dir = project_root / "data" / "uploads"
+    course_uploads_dir = root_uploads_dir / course_id if course_id else root_uploads_dir
+    source_options = _quiz_source_options(current_context.get("uploads", []), course_uploads_dir)
+    source_lookup = {option["stored_name"]: option for option in source_options}
     indexer = CourseMaterialIndexer(
-        uploads_dir=project_root / "data" / "uploads",
+        uploads_dir=root_uploads_dir,
         vector_store_dir=project_root / "data" / "vector_store",
     )
     quiz_generator = QuizGeneratorAgent()
@@ -72,7 +77,14 @@ def render_quiz_page(project_root: Path) -> None:
         with st.container(border=True):
             st.markdown(f"#### {t('quiz.setup', language)}")
             with st.form("quiz_config_form"):
-                topic = st.text_input(t("quiz.topic", language), value=default_topic)
+                selected_source_name = st.selectbox(
+                    t("quiz.source_file", language),
+                    options=[option["stored_name"] for option in source_options],
+                    index=0 if source_options else None,
+                    format_func=lambda value: source_lookup.get(value, {}).get("label", value),
+                    disabled=active_course is None or not source_options,
+                    placeholder=t("quiz.source_file_placeholder", language),
+                )
                 difficulty = st.selectbox(
                     t("quiz.difficulty", language),
                     options=["easy", "medium", "hard"],
@@ -99,7 +111,13 @@ def render_quiz_page(project_root: Path) -> None:
                     step=1,
                     format="%d",
                 )
-                create_quiz = st.form_submit_button(t("quiz.create", language), use_container_width=True, disabled=active_course is None)
+                create_quiz = st.form_submit_button(
+                    t("quiz.create", language),
+                    use_container_width=True,
+                    disabled=active_course is None or not source_options,
+                )
+                if active_course is not None and not source_options:
+                    st.info(t("quiz.no_files", language))
 
     with history_col:
         with st.container(border=True):
@@ -126,12 +144,13 @@ def render_quiz_page(project_root: Path) -> None:
 
     generation_request = None
     if create_quiz:
-        topic = " ".join(topic.split())
-        if not topic:
-            st.warning(t("quiz.topic_required", language))
+        selected_source = source_lookup.get(selected_source_name or "")
+        if not selected_source:
+            st.warning(t("quiz.file_required", language))
         elif not question_types:
             st.warning(t("quiz.type_required", language))
         else:
+            topic = selected_source["topic"]
             quiz_language = detect_language(topic)
             if quiz_language != "ar":
                 quiz_language = language
@@ -143,6 +162,8 @@ def render_quiz_page(project_root: Path) -> None:
                 question_types=question_types,
                 course_id=course_id,
                 course_name=course_name,
+                source_name=selected_source["stored_name"],
+                source_label=selected_source["label"],
             )
     elif retry_request:
         generation_request = retry_request
@@ -151,7 +172,7 @@ def render_quiz_page(project_root: Path) -> None:
         update_active_course_bucket(
             quiz_generation_status=_quiz_generation_status_payload("loading", request=generation_request)
         )
-        with st.spinner(t("quiz.loading", language, topic=generation_request["topic"])):
+        with st.spinner(t("quiz.loading", language, topic=generation_request.get("source_label") or generation_request["topic"])):
             try:
                 generation_result = generate_quiz_from_course_materials(
                     indexer=indexer,
@@ -161,9 +182,14 @@ def render_quiz_page(project_root: Path) -> None:
                     language=generation_request["language"],
                     difficulty=generation_request["difficulty"],
                     question_types=generation_request["question_types"],
-                    previous_questions=current_context.get("generated_questions", []),
+                    avoid_questions=quiz_history_avoid_questions(
+                        course_context().get("generated_questions", []),
+                        course_id=generation_request["course_id"],
+                        topic=generation_request["topic"],
+                    ),
                     course_id=generation_request["course_id"],
                     course_name=generation_request["course_name"],
+                    source_name=generation_request.get("source_name"),
                 )
             except Exception:
                 generation_result = {
@@ -429,6 +455,8 @@ def _store_generated_quiz(
         **quiz_result["quiz"],
         "course_id": generation_request.get("course_id"),
         "course_name": generation_request.get("course_name"),
+        "source_name": generation_request.get("source_name"),
+        "source_label": generation_request.get("source_label"),
         "difficulty": generation_request["difficulty"],
         "question_types": list(generation_request["question_types"]),
         "requested_count": int(generation_request["count"]),
@@ -436,17 +464,22 @@ def _store_generated_quiz(
         "flashcards": quiz_result.get("flashcards") or quiz_result["quiz"].get("flashcards", []),
         "source_count": len(context_chunks),
     }
-    generated_questions = list(previous_generated_questions or [])
-    generated_questions.extend(str(question.get("question", "")) for question in questions if question.get("question"))
+    generated_questions = append_quiz_history(
+        previous_generated_questions,
+        course_id=generation_request.get("course_id"),
+        topic=generation_request["topic"],
+        questions=questions,
+    )
     update_active_course_bucket(
         active_quiz=active_quiz,
         last_quiz_feedback=None,
-        generated_questions=generated_questions[-120:],
+        generated_questions=generated_questions,
         quiz_generation_status=_quiz_generation_status_payload(
             "generated",
             request=generation_request,
             source_count=len(context_chunks),
             question_count=len(questions),
+            limited_material=bool(quiz_result.get("limited_material")),
         ),
     )
     return active_quiz
@@ -461,6 +494,8 @@ def _quiz_generation_request(
     question_types: list[str],
     course_id: str | None,
     course_name: str | None,
+    source_name: str | None = None,
+    source_label: str | None = None,
 ) -> dict[str, Any]:
     return {
         "topic": topic,
@@ -470,6 +505,8 @@ def _quiz_generation_request(
         "question_types": list(question_types),
         "course_id": course_id,
         "course_name": course_name,
+        "source_name": source_name,
+        "source_label": source_label,
     }
 
 
@@ -493,6 +530,7 @@ def _quiz_generation_status_payload(
     stats: dict[str, Any] | None = None,
     source_count: int | None = None,
     question_count: int | None = None,
+    limited_material: bool = False,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": status,
@@ -504,6 +542,8 @@ def _quiz_generation_status_payload(
             "question_types": list(request["question_types"]),
             "course_id": request.get("course_id"),
             "course_name": request.get("course_name"),
+            "source_name": request.get("source_name"),
+            "source_label": request.get("source_label"),
         },
         "updated_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
     }
@@ -515,6 +555,8 @@ def _quiz_generation_status_payload(
         payload["source_count"] = source_count
     if question_count is not None:
         payload["question_count"] = question_count
+    if limited_material:
+        payload["limited_material"] = True
     return payload
 
 
@@ -545,6 +587,8 @@ def _retry_quiz_generation_request(status: dict[str, Any] | None) -> dict[str, A
         question_types=question_types,
         course_id=request.get("course_id"),
         course_name=request.get("course_name"),
+        source_name=request.get("source_name"),
+        source_label=request.get("source_label"),
     )
 
 
@@ -556,30 +600,33 @@ def _render_quiz_generation_status(status: Any, language: str) -> None:
     request = status["request"]
     status_name = status["status"]
     topic = request.get("topic", "Revision")
+    topic_label = request.get("source_label") or topic
     if status_name == "loading":
-        st.info(t("quiz.status.loading", language, topic=topic))
+        st.info(t("quiz.status.loading", language, topic=topic_label))
         return
 
     if status_name == "generated":
         source_count = int(status.get("source_count") or 0)
         question_count = int(status.get("question_count") or request.get("count") or 0)
         source_note = t("quiz.source_note", language, count=source_count) if source_count else ""
-        st.success(
-            t(
-                "quiz.status.generated",
-                language,
-                topic=topic,
-                count=question_count,
-                source_note=source_note,
-            )
+        message = t(
+            "quiz.status.generated",
+            language,
+            topic=topic_label,
+            count=question_count,
+            source_note=source_note,
         )
+        if status.get("limited_material"):
+            st.warning(t("quiz.limited_material", language, topic=topic_label, count=question_count))
+        else:
+            st.success(message)
         return
 
     reason = str(status.get("reason") or "generation_failed")
     message = t(f"quiz.{reason}", language)
     stats = status.get("stats") if isinstance(status.get("stats"), dict) else {}
     chunk_count = stats.get("chunks", 0)
-    st.warning(t("quiz.status.failed", language, topic=topic, reason=message, chunks=chunk_count))
+    st.warning(t("quiz.status.failed", language, topic=topic_label, reason=message, chunks=chunk_count))
 
 
 def generate_quiz_from_course_materials(
@@ -591,20 +638,29 @@ def generate_quiz_from_course_materials(
     language: str,
     difficulty: str,
     question_types: list[str],
-    previous_questions: list[str],
     course_id: str | None,
     course_name: str | None,
+    previous_questions: list[str] | None = None,
+    avoid_questions: list[str] | None = None,
+    source_name: str | None = None,
 ) -> dict[str, Any]:
     indexer.index_all(course_id=course_id, course_name=course_name)
     stats = indexer.stats(course_id=course_id)
     if stats["chunks"] == 0:
         return {"ok": False, "reason": "materials_required", "stats": stats}
 
-    context_matches = indexer.search(
-        topic,
-        top_k=min(max(int(count), 3), 8),
-        course_id=course_id,
-    )
+    if source_name:
+        context_matches = indexer.chunks_for_source(
+            source_name,
+            top_k=min(max(int(count) * 3, 8), 16),
+            course_id=course_id,
+        )
+    else:
+        context_matches = indexer.search(
+            topic,
+            top_k=min(max(int(count), 3), 8),
+            course_id=course_id,
+        )
     context_chunks = [
         {
             "source_name": match.source_name,
@@ -617,7 +673,8 @@ def generate_quiz_from_course_materials(
         for match in context_matches
     ]
     if not context_chunks:
-        return {"ok": False, "reason": "material_match_required", "stats": stats, "context_chunks": []}
+        reason = "file_material_required" if source_name else "material_match_required"
+        return {"ok": False, "reason": reason, "stats": stats, "context_chunks": []}
 
     quiz_result = quiz_generator.generate(
         topic=topic,
@@ -627,6 +684,7 @@ def generate_quiz_from_course_materials(
         difficulty=difficulty,
         question_types=question_types,
         previous_questions=previous_questions,
+        avoid_questions=avoid_questions,
     )
     quiz = quiz_result.get("quiz")
     questions = quiz_result.get("questions") or (quiz.get("questions", []) if isinstance(quiz, dict) else [])
@@ -647,8 +705,39 @@ def generate_quiz_from_course_materials(
     }
 
 
-def _default_topic(active_plan: dict[str, Any] | None) -> str:
-    if active_plan and active_plan.get("weak_topics"):
-        return active_plan["weak_topics"][0]
-    return "Backpropagation"
+def _quiz_source_options(uploads: list[dict[str, Any]], uploads_dir: Path) -> list[dict[str, str]]:
+    upload_by_stored_name = {
+        str(item.get("stored_name")): item
+        for item in uploads
+        if isinstance(item, dict) and item.get("stored_name")
+    }
+    stored_files = sorted(
+        file_path
+        for file_path in uploads_dir.glob("*")
+        if file_path.is_file() and file_path.name != ".gitkeep"
+    )
+    options = []
+    for file_path in stored_files:
+        upload = upload_by_stored_name.get(file_path.name, {})
+        original_name = str(upload.get("original_name") or _display_name_from_stored_file(file_path.name)).strip()
+        saved_at = str(upload.get("saved_at_utc") or "").strip()
+        label = original_name
+        if saved_at:
+            label = f"{original_name} - {saved_at[:10]}"
+        options.append(
+            {
+                "stored_name": file_path.name,
+                "label": label,
+                "topic": Path(original_name).stem.replace("_", " ").replace("-", " ").strip() or original_name,
+            }
+        )
+    return options
+
+
+def _display_name_from_stored_file(stored_name: str) -> str:
+    match = re.match(r"^\d{8}_\d{6}_(.+)$", stored_name)
+    if match:
+        return match.group(1)
+    return stored_name
+
 

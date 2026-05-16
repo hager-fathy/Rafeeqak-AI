@@ -247,6 +247,41 @@ class CourseMaterialIndexer:
 
         return sorted(scored_chunks, key=lambda item: item.score, reverse=True)[:top_k]
 
+    def chunks_for_source(
+        self,
+        source_name: str,
+        *,
+        course_id: str | None = None,
+        top_k: int | None = None,
+    ) -> list[RetrievedChunk]:
+        source_name = str(source_name or "").strip()
+        if not source_name:
+            return []
+
+        store = self._load_store()
+        chunks = []
+        for chunk in store["chunks"]:
+            if course_id is not None and chunk.get("course_id") != course_id:
+                continue
+            if chunk.get("source_name") != source_name:
+                continue
+            chunks.append(
+                RetrievedChunk(
+                    source_name=chunk["source_name"],
+                    section=chunk["section"],
+                    text=chunk["text"],
+                    score=1.0,
+                    chunk_index=chunk.get("chunk_index", 1),
+                    course_id=chunk.get("course_id"),
+                    course_name=chunk.get("course_name"),
+                )
+            )
+
+        ordered = sorted(chunks, key=lambda item: (item.section, item.chunk_index))
+        if top_k is None:
+            return ordered
+        return ordered[: max(int(top_k), 0)]
+
     def stats(self, *, course_id: str | None = None) -> dict[str, Any]:
         store = self._load_store()
         chunks = [

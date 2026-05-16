@@ -17,6 +17,7 @@ TEMPLATE_VARIABLES: dict[str, set[str]] = {
         "number_of_questions",
         "question_types",
         "context",
+        "avoid_questions",
         "language",
     },
     "progress_feedback": {"course_name", "score", "weak_topics", "recommendations", "language"},

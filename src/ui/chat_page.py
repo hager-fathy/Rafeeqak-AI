@@ -3,6 +3,7 @@ from pathlib import Path
 import streamlit as st
 
 from src.localization import t
+from src.tools.quiz_history import append_quiz_history
 from src.tools.state import (
     course_context,
     get_active_course,
@@ -28,12 +29,17 @@ def _assistant_reply(user_message: str) -> str:
         memory_agent=get_memory_agent(),
     )
     if result["agent"] == "quiz_generator_agent" and result.get("payload", {}).get("quiz"):
-        generated_questions = context.get("generated_questions", [])
-        generated_questions.extend(question["question"] for question in result["payload"].get("questions", []))
+        quiz_payload = result["payload"]
+        generated_questions = append_quiz_history(
+            context.get("generated_questions", []),
+            course_id=context.get("active_course_id"),
+            topic=quiz_payload.get("topic") or quiz_payload.get("quiz", {}).get("topic", "Revision"),
+            questions=quiz_payload.get("questions", []),
+        )
         update_active_course_bucket(
-            active_quiz=result["payload"]["quiz"],
+            active_quiz=quiz_payload["quiz"],
             last_quiz_feedback=None,
-            generated_questions=generated_questions[-120:],
+            generated_questions=generated_questions,
         )
     if result["agent"] == "reminder_agent" and result.get("payload", {}).get("reminders") is not None:
         update_active_course_bucket(reminders=result["payload"]["reminders"])
