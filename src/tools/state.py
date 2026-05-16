@@ -28,6 +28,10 @@ COURSE_SCOPED_KEYS = (
 )
 
 WORKSPACE_VERSION = 1
+VALID_DIFFICULTIES = {"easy", "medium", "hard"}
+VALID_QUESTION_TYPES = {"mcq", "true_false", "short_answer", "matching"}
+VALID_STUDY_PREFERENCES = {"balanced", "deep_focus", "practice_first", "exam_revision"}
+VALID_REMINDER_TYPES = {"lecture", "revision", "quiz", "missed_task", "deadline", "study_task", "custom"}
 
 
 def _empty_course_bucket() -> dict:
@@ -46,6 +50,24 @@ def _empty_course_bucket() -> dict:
     }
 
 
+def _default_user_settings() -> dict:
+    return {
+        "full_name": "",
+        "preferred_language": "en",
+        "daily_study_hours": 2.0,
+        "default_quiz_difficulty": "medium",
+        "default_question_types": ["mcq"],
+        "default_course_difficulty": "medium",
+        "study_preference": "balanced",
+        "reminder_preferences": {
+            "enabled": True,
+            "lead_days": 1,
+            "reminder_time": "18:00",
+            "types": ["lecture", "revision", "quiz", "missed_task", "deadline", "study_task", "custom"],
+        },
+    }
+
+
 def _normalize_course_bucket(bucket: dict | None) -> dict:
     normalized = _empty_course_bucket()
     if isinstance(bucket, dict):
@@ -53,6 +75,38 @@ def _normalize_course_bucket(bucket: dict | None) -> dict:
             value = bucket.get(key)
             if value is not None:
                 normalized[key] = value
+    return normalized
+
+
+def _normalize_user_settings(settings: dict | None) -> dict:
+    normalized = _default_user_settings()
+    if not isinstance(settings, dict):
+        return normalized
+
+    full_name = str(settings.get("full_name") or "").strip()
+    normalized["full_name"] = full_name[:120]
+    normalized["preferred_language"] = normalize_language(settings.get("preferred_language"))
+    normalized["daily_study_hours"] = _coerce_float(
+        settings.get("daily_study_hours"),
+        fallback=normalized["daily_study_hours"],
+        minimum=0.5,
+        maximum=12.0,
+    )
+    normalized["default_quiz_difficulty"] = _normalize_difficulty(
+        settings.get("default_quiz_difficulty"),
+        fallback=normalized["default_quiz_difficulty"],
+    )
+    normalized["default_question_types"] = _normalize_question_types(settings.get("default_question_types"))
+    normalized["default_course_difficulty"] = _normalize_difficulty(
+        settings.get("default_course_difficulty"),
+        fallback=normalized["default_course_difficulty"],
+    )
+    normalized["study_preference"] = _normalize_choice(
+        settings.get("study_preference"),
+        valid=VALID_STUDY_PREFERENCES,
+        fallback=normalized["study_preference"],
+    )
+    normalized["reminder_preferences"] = _normalize_reminder_preferences(settings.get("reminder_preferences"))
     return normalized
 
 
@@ -78,6 +132,7 @@ def init_state() -> None:
         "active_course_name": None,
         "course_data": {},
         "selected_language": "en",
+        "user_settings": _default_user_settings(),
         "language_profile_loaded": False,
         "language_sync_notice": None,
         "workspace_loaded_for": None,
@@ -96,7 +151,7 @@ def touch_activity() -> None:
     st.session_state["last_activity_at"] = datetime.utcnow().isoformat(timespec="seconds")
 
 
-def add_course(course_name: str, *, difficulty: str = "Medium") -> dict | None:
+def add_course(course_name: str, *, difficulty: str | None = None) -> dict | None:
     normalized_name = " ".join(course_name.split())
     if not normalized_name:
         return None
@@ -108,10 +163,11 @@ def add_course(course_name: str, *, difficulty: str = "Medium") -> dict | None:
             return course
 
     course_id = _course_id(normalized_name)
+    course_difficulty = difficulty or get_user_settings().get("default_course_difficulty", "medium")
     course = {
         "id": course_id,
         "name": normalized_name,
-        "difficulty": difficulty,
+        "difficulty": _normalize_difficulty(course_difficulty, fallback="medium").title(),
         "created_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
     }
     st.session_state["courses"].append(course)
@@ -234,6 +290,10 @@ def set_selected_language(language: str | None) -> bool:
     normalized = normalize_language(language)
     changed = normalized != st.session_state.get("selected_language")
     st.session_state["selected_language"] = normalized
+    user_settings = get_user_settings()
+    if user_settings.get("preferred_language") != normalized:
+        user_settings["preferred_language"] = normalized
+        st.session_state["user_settings"] = user_settings
     if changed:
         _save_user_workspace()
     return changed
@@ -282,6 +342,34 @@ def update_active_course_bucket(**values: object) -> None:
     _save_user_workspace()
 
 
+def get_user_settings() -> dict:
+    settings = _normalize_user_settings(st.session_state.get("user_settings"))
+    st.session_state["user_settings"] = settings
+    return settings
+
+
+def update_user_settings(settings: dict | None = None, **values: object) -> dict:
+    current_settings = get_user_settings()
+    merged = deepcopy(current_settings)
+    updates = dict(settings or {})
+    updates.update(values)
+
+    for key, value in updates.items():
+        if key == "reminder_preferences" and isinstance(value, dict):
+            reminder_preferences = dict(merged.get("reminder_preferences", {}))
+            reminder_preferences.update(value)
+            merged["reminder_preferences"] = reminder_preferences
+        else:
+            merged[key] = value
+
+    normalized = _normalize_user_settings(merged)
+    st.session_state["user_settings"] = normalized
+    st.session_state["selected_language"] = normalized["preferred_language"]
+    touch_activity()
+    _save_user_workspace()
+    return normalized
+
+
 def upsert_active_chat_summary(summary: dict, *, limit: int = 20) -> None:
     active_course = get_active_course()
     if active_course is None:
@@ -299,6 +387,7 @@ def upsert_active_chat_summary(summary: dict, *, limit: int = 20) -> None:
 def course_context() -> dict:
     active_course = get_active_course()
     bucket = get_active_course_bucket()
+    user_settings = get_user_settings()
     return {
         "active_course": active_course,
         "active_course_id": active_course["id"] if active_course else None,
@@ -314,6 +403,10 @@ def course_context() -> dict:
         "generated_questions": bucket.get("generated_questions", []),
         "all_courses": _all_course_summaries(),
         "selected_language": get_selected_language(),
+        "user_settings": user_settings,
+        "quiz_difficulty": user_settings["default_quiz_difficulty"],
+        "question_types": user_settings["default_question_types"],
+        "reminder_preferences": user_settings["reminder_preferences"],
     }
 
 
@@ -358,6 +451,14 @@ def _all_course_summaries() -> list[dict]:
         bucket = course_data.get(course["id"], _empty_course_bucket())
         active_plan = bucket.get("active_plan") or {}
         tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
+        completed_tasks = [task for task in tasks if isinstance(task, dict) and task.get("completed")]
+        upcoming_tasks = [
+            task
+            for task in tasks
+            if isinstance(task, dict) and not task.get("completed") and str(task.get("date", "")).strip()
+        ]
+        upcoming_tasks = sorted(upcoming_tasks, key=lambda task: str(task.get("date") or ""))
+        next_task = upcoming_tasks[0] if upcoming_tasks else None
         quiz_attempts = bucket.get("quiz_attempts", []) or []
         average_score = 0.0
         if quiz_attempts:
@@ -368,6 +469,9 @@ def _all_course_summaries() -> list[dict]:
         weak_topics = set(active_plan.get("weak_topics", []) if isinstance(active_plan, dict) else [])
         for attempt in quiz_attempts:
             weak_topics.update(attempt.get("weak_topics", []) or [])
+        reminders = [item for item in bucket.get("reminders", []) or [] if isinstance(item, dict)]
+        pending_reminders = [item for item in reminders if item.get("status") != "done"]
+        completion_rate = round((len(completed_tasks) / len(tasks)) * 100, 1) if tasks else 0.0
         summaries.append(
             {
                 "course_id": course["id"],
@@ -375,11 +479,18 @@ def _all_course_summaries() -> list[dict]:
                 "difficulty": course.get("difficulty", "Medium"),
                 "plans": len(bucket.get("study_plans", []) or []),
                 "total_tasks": len(tasks),
-                "completed_tasks": sum(1 for task in tasks if task.get("completed")),
+                "completed_tasks": len(completed_tasks),
+                "completion_rate": completion_rate,
+                "upcoming_tasks": len(upcoming_tasks),
+                "next_task": next_task,
                 "quiz_attempts": len(quiz_attempts),
                 "average_score": average_score,
                 "uploads": len(bucket.get("uploads", []) or []),
-                "reminders": len(bucket.get("reminders", []) or []),
+                "reminders": len(reminders),
+                "pending_reminders": len(pending_reminders),
+                "next_reminder": sorted(pending_reminders, key=lambda item: item.get("due_at") or "")[0]
+                if pending_reminders
+                else None,
                 "chat_summaries": len(bucket.get("chat_summaries", []) or []),
                 "weak_topics": sorted(weak_topics),
                 "exam_date": active_plan.get("exam_date") if isinstance(active_plan, dict) else None,
@@ -470,6 +581,8 @@ def _rename_course_references(course_id: str, course_name: str) -> None:
         item["course_name"] = course_name
     for item in bucket.get("quiz_attempts", []) or []:
         item["course_name"] = course_name
+    for item in bucket.get("reminders", []) or []:
+        item["course_name"] = course_name
 
     for plan in bucket.get("study_plans", []) or []:
         if isinstance(plan, dict):
@@ -525,6 +638,7 @@ def _current_workspace_state() -> dict:
         "active_course_name": st.session_state.get("active_course_name"),
         "course_data": normalized_course_data,
         "selected_language": get_selected_language(),
+        "user_settings": deepcopy(get_user_settings()),
     }
 
 
@@ -543,7 +657,11 @@ def _apply_workspace_state(workspace: dict) -> None:
 
         st.session_state["active_course_id"] = workspace.get("active_course_id")
         st.session_state["active_course_name"] = workspace.get("active_course_name")
-        st.session_state["selected_language"] = normalize_language(workspace.get("selected_language"))
+        st.session_state["user_settings"] = _normalize_user_settings(workspace.get("user_settings"))
+        st.session_state["selected_language"] = normalize_language(
+            workspace.get("selected_language") or st.session_state["user_settings"].get("preferred_language")
+        )
+        st.session_state["user_settings"]["preferred_language"] = st.session_state["selected_language"]
 
         if get_active_course() is None:
             next_course = st.session_state["courses"][0] if st.session_state["courses"] else None
@@ -562,6 +680,7 @@ def _reset_workspace_state() -> None:
         st.session_state["active_course_name"] = None
         st.session_state["course_data"] = {}
         st.session_state["selected_language"] = "en"
+        st.session_state["user_settings"] = _default_user_settings()
         for key, value in _empty_course_bucket().items():
             st.session_state[key] = value
     finally:
@@ -587,3 +706,60 @@ def _user_email(user: dict | None) -> str | None:
     if not email:
         return None
     return str(email).strip().casefold() or None
+
+
+def _normalize_difficulty(value: object, *, fallback: str) -> str:
+    return _normalize_choice(value, valid=VALID_DIFFICULTIES, fallback=fallback)
+
+
+def _normalize_choice(value: object, *, valid: set[str], fallback: str) -> str:
+    normalized = str(value or fallback).strip().lower()
+    return normalized if normalized in valid else fallback
+
+
+def _normalize_question_types(value: object) -> list[str]:
+    raw_values = value if isinstance(value, list) else []
+    normalized = []
+    for item in raw_values:
+        question_type = str(item).strip().lower()
+        if question_type in VALID_QUESTION_TYPES and question_type not in normalized:
+            normalized.append(question_type)
+    return normalized or ["mcq"]
+
+
+def _normalize_reminder_preferences(value: object) -> dict:
+    defaults = _default_user_settings()["reminder_preferences"]
+    preferences = value if isinstance(value, dict) else {}
+    try:
+        lead_days = int(preferences.get("lead_days", defaults["lead_days"]))
+    except (TypeError, ValueError):
+        lead_days = defaults["lead_days"]
+    lead_days = min(max(lead_days, 0), 14)
+
+    reminder_time = str(preferences.get("reminder_time") or defaults["reminder_time"]).strip()
+    if not re.match(r"^\d{2}:\d{2}$", reminder_time):
+        reminder_time = defaults["reminder_time"]
+
+    raw_types = preferences.get("types")
+    if not isinstance(raw_types, list):
+        raw_types = defaults["types"]
+    reminder_types = []
+    for item in raw_types:
+        reminder_type = str(item).strip().lower()
+        if reminder_type in VALID_REMINDER_TYPES and reminder_type not in reminder_types:
+            reminder_types.append(reminder_type)
+
+    return {
+        "enabled": bool(preferences.get("enabled", defaults["enabled"])),
+        "lead_days": lead_days,
+        "reminder_time": reminder_time,
+        "types": reminder_types or list(defaults["types"]),
+    }
+
+
+def _coerce_float(value: object, *, fallback: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = fallback
+    return round(min(max(parsed, minimum), maximum), 1)

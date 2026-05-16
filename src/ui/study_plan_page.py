@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from src.agents.reminder_agent import ReminderAgent
 from src.localization import t
 from src.tools.state import (
     add_course,
@@ -13,6 +14,7 @@ from src.tools.state import (
     get_memory_agent,
     get_selected_language,
     get_supervisor_agent,
+    get_user_settings,
     touch_activity,
     update_active_course_bucket,
     update_course_details,
@@ -126,13 +128,16 @@ def render_study_plan_page(project_root: Path) -> None:
     auth_user = get_authenticated_user()
     student_email = auth_user.get("email") if auth_user else None
     student_name = (auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None
+    user_settings = get_user_settings()
     active_course = get_active_course()
     current_context = course_context()
     active_plan = current_context.get("active_plan")
     derived_weak_topics = _derived_weak_topics(current_context)
     progress_snapshot = _progress_snapshot(current_context)
-    course_difficulty = str((active_course or {}).get("difficulty", "Medium")).strip().lower()
-    default_difficulty = str((active_plan or {}).get("difficulty") or course_difficulty or "medium").lower()
+    course_difficulty = str((active_course or {}).get("difficulty") or user_settings["default_course_difficulty"]).strip().lower()
+    default_difficulty = str(
+        (active_plan or {}).get("difficulty") or course_difficulty or user_settings["default_course_difficulty"]
+    ).lower()
     if default_difficulty not in {"easy", "medium", "hard"}:
         default_difficulty = "medium"
     default_exam_date = _default_exam_date(active_plan)
@@ -192,7 +197,7 @@ def render_study_plan_page(project_root: Path) -> None:
                     t("planner.daily_hours", language),
                     min_value=0.5,
                     max_value=12.0,
-                    value=float((active_plan or {}).get("daily_hours") or 2.0),
+                    value=float((active_plan or {}).get("daily_hours") or user_settings["daily_study_hours"]),
                     step=0.5,
                 )
                 weak_topics_input = st.text_input(
@@ -282,6 +287,12 @@ def render_study_plan_page(project_root: Path) -> None:
         study_plans = current_context["study_plans"]
         study_plans.append(plan)
         update_active_course_bucket(study_plans=study_plans, active_plan=plan)
+        reminder_result = ReminderAgent().create(
+            message="create reminders for this course",
+            context=course_context(),
+            language=language,
+        )
+        update_active_course_bucket(reminders=reminder_result["reminders"])
         touch_activity()
         st.success(plan_result["summary"])
 
@@ -290,6 +301,16 @@ def render_study_plan_page(project_root: Path) -> None:
             st.info(t("planner.synced", language))
         else:
             st.warning(t("planner.local_only", language, reason=sync_result["reason"]))
+        reminder_sync = memory_agent.sync_reminders(
+            course_name=active_course["name"],
+            reminders=reminder_result["reminders"],
+            student_email=student_email,
+            student_name=student_name,
+        )
+        if reminder_sync["ok"]:
+            st.info(t("dashboard.reminders_synced", language))
+        elif memory_status["enabled"]:
+            st.warning(t("dashboard.reminders_local_only", language, reason=reminder_sync["reason"]))
 
     active_plan = course_context().get("active_plan")
     if not active_plan:

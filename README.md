@@ -1,6 +1,6 @@
 # Smart Study Planner
 
-This repository contains phase 1, phase 2, phase 3 (Supabase memory), phase 4 (multi-agent routing), phase 5 (course-material RAG), phase 6 (quiz generation and evaluation), phase 7 (CAG and structured database query), phase 8 (multi-course core), phase 9 (localization and UI polish), and phase 10 (prompt templates and LLM quality) of the Smart Study Planner Chatbot project.
+This repository contains phases 1 through 12 of the Smart Study Planner Chatbot project, including Supabase memory, multi-agent routing, course-material RAG, quiz generation and evaluation, CAG/database query, multi-course support, localization, prompt templates, upgraded planning, dashboards, settings, and reminders.
 
 The enhanced roadmap in `project..md` now upgrades Rafeeqak toward a stronger multi-course study assistant where each course has its own materials, study plan, quizzes, flashcards, weak topics, progress, and chat history.
 
@@ -14,7 +14,8 @@ The enhanced roadmap in `project..md` now upgrades Rafeeqak toward a stronger mu
 - Phase 8: multi-course core upgrade with global course selector, course management, and course-scoped data
 - Phase 9: full Arabic localization, RTL layout, and UI polish
 - Phase 10: reusable prompt templates for RAG answers, course Q&A, lecture summaries, quiz generation, progress feedback, and study planning
-- Phase 11+: planned planner upgrades, dashboard analytics, settings, and final demo hardening
+- Phase 11: personalized planner upgrade with adaptive defaults, weak-topic priority, and recovery guidance
+- Phase 12: dashboard analytics, settings, and course-scoped reminders
 
 ## Quick Start
 
@@ -127,10 +128,14 @@ smart-study-planner/
   - prompt templates live in `src/prompts/templates`
   - RAG answers, quiz generation, and study planning render prompts through a shared prompt registry
   - templates also cover course Q&A, lecture summaries, and progress feedback for planned agent upgrades
+- Phase 12 platform flow:
+  - dashboard shows all-course cards, progress, completed/upcoming tasks, quiz averages, weak topics, uploads, deadlines, and reminders
+  - Settings page saves name, language, daily study hours, quiz defaults, difficulty defaults, study preference, and reminder preferences
+  - reminder records cover lectures, revision sessions, quizzes, missed tasks, weak topics, and deadlines, with local persistence and optional Supabase sync
 
 ## Next Phases
 
 Upcoming phases should focus on:
 
-- Better quiz types, partial text scoring, and stronger personalized feedback
-- Per-course dashboard analytics and settings page
+- Final demo hardening and end-to-end validation
+- Additional Phase 13 tests for course selector gating, reminder creation, and demo flows

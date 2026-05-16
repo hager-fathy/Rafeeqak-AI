@@ -37,6 +37,13 @@ def _assistant_reply(user_message: str) -> str:
         )
     if result["agent"] == "reminder_agent" and result.get("payload", {}).get("reminders") is not None:
         update_active_course_bucket(reminders=result["payload"]["reminders"])
+        auth_user = get_authenticated_user()
+        get_memory_agent().sync_reminders(
+            course_name=context.get("active_course_name"),
+            reminders=result["payload"]["reminders"],
+            student_email=auth_user.get("email") if auth_user else None,
+            student_name=(auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None,
+        )
     return result["response"]
 
 

@@ -15,6 +15,7 @@ from src.tools.state import (
     get_authenticated_user,
     get_memory_agent,
     get_selected_language,
+    get_user_settings,
     require_active_course_message,
     touch_activity,
     update_active_course_bucket,
@@ -31,6 +32,7 @@ def render_quiz_page(project_root: Path) -> None:
     student_name = (auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None
     active_course = get_active_course()
     current_context = course_context()
+    user_settings = get_user_settings()
     active_plan = current_context.get("active_plan")
     default_topic = _default_topic(active_plan)
     course_id = active_course["id"] if active_course else None
@@ -74,7 +76,7 @@ def render_quiz_page(project_root: Path) -> None:
                 difficulty = st.selectbox(
                     t("quiz.difficulty", language),
                     options=["easy", "medium", "hard"],
-                    index=1,
+                    index=["easy", "medium", "hard"].index(user_settings["default_quiz_difficulty"]),
                     format_func=lambda value: t(f"quiz.difficulty.{value}", language),
                 )
                 question_type_labels = {
@@ -86,7 +88,7 @@ def render_quiz_page(project_root: Path) -> None:
                 question_types = st.multiselect(
                     t("quiz.types", language),
                     options=list(question_type_labels.keys()),
-                    default=["mcq"],
+                    default=user_settings["default_question_types"],
                     format_func=lambda value: question_type_labels[value],
                 )
                 question_count = st.number_input(

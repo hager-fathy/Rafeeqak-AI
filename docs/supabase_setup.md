@@ -20,6 +20,7 @@ This creates:
 - `study_tasks`
 - `quiz_scores`
 - `weak_topics`
+- `reminders`
 - row-level security policies that allow each logged-in student to manage only their own rows
 
 If you created the tables before these policies were added and see an error like
@@ -48,4 +49,5 @@ cd H:\GEN-AI\smart-study-planner
 2. If email confirmation is enabled, confirm email then use **Login**.
 3. Generate a study plan in the **Study Plan** page.
 4. Submit a quiz in the **Quiz** page.
-5. Open **Progress Dashboard** and expand `Supabase memory snapshot`.
+5. Update defaults in **Settings**.
+6. Open **Progress Dashboard** and expand `Supabase memory snapshot`.

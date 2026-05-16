@@ -10,9 +10,20 @@ create table if not exists public.student_profiles (
     preferred_language text default 'en',
     study_style text,
     preferred_study_hours text,
+    daily_study_hours numeric(4, 1) not null default 2.0,
+    quiz_preferences jsonb not null default '{}'::jsonb,
+    difficulty_level text not null default 'medium',
+    study_preferences jsonb not null default '{}'::jsonb,
+    reminder_preferences jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
+
+alter table public.student_profiles add column if not exists daily_study_hours numeric(4, 1) not null default 2.0;
+alter table public.student_profiles add column if not exists quiz_preferences jsonb not null default '{}'::jsonb;
+alter table public.student_profiles add column if not exists difficulty_level text not null default 'medium';
+alter table public.student_profiles add column if not exists study_preferences jsonb not null default '{}'::jsonb;
+alter table public.student_profiles add column if not exists reminder_preferences jsonb not null default '{}'::jsonb;
 
 create table if not exists public.courses (
     id uuid primary key default gen_random_uuid(),
@@ -92,12 +103,30 @@ create table if not exists public.chat_session_summaries (
     unique (student_id, course_id, session_key)
 );
 
+create table if not exists public.reminders (
+    id uuid primary key default gen_random_uuid(),
+    student_id uuid not null references public.student_profiles(id) on delete cascade,
+    course_id uuid references public.courses(id) on delete cascade,
+    reminder_key text not null,
+    reminder_type text not null default 'custom',
+    title text not null,
+    due_at timestamptz,
+    status text not null default 'pending',
+    source text,
+    topic text,
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (student_id, course_id, reminder_key)
+);
+
 create index if not exists idx_courses_student_id on public.courses(student_id);
 create index if not exists idx_exams_student_course on public.exams(student_id, course_id);
 create index if not exists idx_study_tasks_student_course on public.study_tasks(student_id, course_id);
 create index if not exists idx_quiz_scores_student_time on public.quiz_scores(student_id, attempted_at desc);
 create index if not exists idx_weak_topics_student on public.weak_topics(student_id);
 create index if not exists idx_chat_summaries_student_course on public.chat_session_summaries(student_id, course_id);
+create index if not exists idx_reminders_student_course_due on public.reminders(student_id, course_id, due_at);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -144,6 +173,11 @@ create trigger trg_chat_session_summaries_updated_at
 before update on public.chat_session_summaries
 for each row execute function public.set_updated_at();
 
+drop trigger if exists trg_reminders_updated_at on public.reminders;
+create trigger trg_reminders_updated_at
+before update on public.reminders
+for each row execute function public.set_updated_at();
+
 alter table public.student_profiles enable row level security;
 alter table public.courses enable row level security;
 alter table public.exams enable row level security;
@@ -151,6 +185,7 @@ alter table public.study_tasks enable row level security;
 alter table public.quiz_scores enable row level security;
 alter table public.weak_topics enable row level security;
 alter table public.chat_session_summaries enable row level security;
+alter table public.reminders enable row level security;
 
 drop policy if exists "Students can manage own profile" on public.student_profiles;
 create policy "Students can manage own profile"
@@ -288,6 +323,28 @@ with check (
         select 1
         from public.student_profiles sp
         where sp.id = chat_session_summaries.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+);
+
+drop policy if exists "Students can manage own reminders" on public.reminders;
+create policy "Students can manage own reminders"
+on public.reminders
+for all
+to authenticated
+using (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = reminders.student_id
+          and sp.email = auth.jwt() ->> 'email'
+    )
+)
+with check (
+    exists (
+        select 1
+        from public.student_profiles sp
+        where sp.id = reminders.student_id
           and sp.email = auth.jwt() ->> 'email'
     )
 );

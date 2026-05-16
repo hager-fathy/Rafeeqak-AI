@@ -407,7 +407,7 @@ The final demo should tell a complete story. A student creates two courses, uplo
 ## 9. Enhanced Implementation Plan
 
 Current status checked: 2026-05-15  
-Latest verification: `.venv\Scripts\python.exe -m pytest` passes: 42 passed, 2 warnings.
+Latest verification: `.venv\Scripts\python.exe -m pytest` passes: 83 passed.
 
 Legend:
 
@@ -526,10 +526,10 @@ Legend:
 
 ### Phase 12 - Dashboard, Settings, And Reminders
 
-- [ ] Dashboard shows progress per course.
-- [ ] Dashboard includes completed tasks, upcoming tasks, quiz scores, average score, weak topics, uploads, deadlines, and reminder summaries.
-- [ ] Add settings page for name, language, daily hours, quiz preferences, difficulty, study preferences, and reminder preferences.
-- [ ] Add notifications/reminders for upcoming lectures, revision sessions, quizzes, missed study tasks, and deadlines.
+- [x] Dashboard shows progress per course.
+- [x] Dashboard includes completed tasks, upcoming tasks, quiz scores, average score, weak topics, uploads, deadlines, and reminder summaries.
+- [x] Add settings page for name, language, daily hours, quiz preferences, difficulty, study preferences, and reminder preferences.
+- [x] Add notifications/reminders for upcoming lectures, revision sessions, quizzes, missed study tasks, and deadlines.
 
 ### Phase 13 - Testing And Demo
 
@@ -542,7 +542,7 @@ Legend:
 - [ ] Add tests for quiz question types and partial scoring.
 - [x] Add tests for quiz loading/failure/retry states.
 - [ ] Add tests for chat/session summary quality.
-- [ ] Add tests for reminder creation.
+- [x] Add tests for reminder creation.
 - [ ] Prepare final demo script.
 - [ ] Run end-to-end manual demo validation.
 
@@ -586,9 +586,9 @@ Legend:
 | Study planner input collection | Pending |
 | Weak-topic-first planning | Pending |
 | Quiz loading/failure/retry states | Complete |
-| Notifications/reminders | Pending |
-| Settings page | Pending |
-| Per-course dashboard summaries | Pending |
+| Notifications/reminders | Complete |
+| Settings page | Complete |
+| Per-course dashboard summaries | Complete |
 
 ---
 

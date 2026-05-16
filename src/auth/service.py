@@ -109,6 +109,27 @@ class AuthService:
         except Exception as exc:  # pragma: no cover - external client behavior
             return {"ok": False, "message": f"Session restore failed: {exc}"}
 
+    def update_profile(self, *, full_name: str) -> dict[str, Any]:
+        if not self.is_available:
+            return {"ok": False, "message": self.unavailability_reason}
+
+        try:
+            response = self.client.auth.update_user(
+                {
+                    "data": {
+                        "full_name": full_name.strip(),
+                    }
+                }
+            )
+            user_data = response.user.model_dump() if response.user else None
+            return {"ok": True, "message": "Profile updated.", "user": user_data}
+        except AuthApiError as exc:
+            return {"ok": False, "message": str(exc)}
+        except AuthError as exc:
+            return {"ok": False, "message": str(exc)}
+        except Exception as exc:  # pragma: no cover - external client behavior
+            return {"ok": False, "message": f"Profile update failed: {exc}"}
+
     def sign_out(self) -> dict[str, Any]:
         if not self.is_available:
             return {"ok": False, "message": self.unavailability_reason}

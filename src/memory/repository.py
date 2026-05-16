@@ -81,6 +81,50 @@ class SupabaseMemoryRepository:
         except Exception as exc:  # pragma: no cover - depends on external DB
             raise MemoryRepositoryError(f"Failed to update preferred language: {exc}") from exc
 
+    def update_student_settings(
+        self,
+        *,
+        email: str | None = None,
+        full_name: str | None = None,
+        preferred_language: str,
+        daily_study_hours: float,
+        quiz_preferences: dict[str, Any],
+        difficulty_level: str,
+        study_preferences: dict[str, Any],
+        reminder_preferences: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._ensure_available()
+
+        student_email = email or self.settings.default_student_email
+        student_name = full_name or self.settings.default_student_name
+        payload = {
+            "email": student_email,
+            "full_name": student_name,
+            "preferred_language": preferred_language,
+            "study_style": study_preferences.get("study_preference"),
+            "preferred_study_hours": str(daily_study_hours),
+            "daily_study_hours": daily_study_hours,
+            "quiz_preferences": quiz_preferences,
+            "difficulty_level": difficulty_level,
+            "study_preferences": study_preferences,
+            "reminder_preferences": reminder_preferences,
+        }
+
+        try:
+            self.client.table("student_profiles").upsert(payload, on_conflict="email").execute()
+            response = (
+                self.client.table("student_profiles")
+                .select("*")
+                .eq("email", student_email)
+                .maybe_single()
+                .execute()
+            )
+            if not response.data:
+                raise MemoryRepositoryError("Could not read back student settings.")
+            return response.data
+        except Exception as exc:  # pragma: no cover - depends on external DB
+            raise MemoryRepositoryError(f"Failed to update student settings: {exc}") from exc
+
     def upsert_course(
         self,
         *,
@@ -267,6 +311,55 @@ class SupabaseMemoryRepository:
         except Exception as exc:  # pragma: no cover - depends on external DB
             raise MemoryRepositoryError(f"Failed to upsert chat summary: {exc}") from exc
 
+    def upsert_reminders(
+        self,
+        *,
+        student_id: str,
+        course_id: str | None,
+        reminders: list[dict[str, Any]],
+    ) -> int:
+        self._ensure_available()
+
+        payload_rows = []
+        for reminder in reminders:
+            if not isinstance(reminder, dict):
+                continue
+            reminder_key = str(reminder.get("reminder_id") or "").strip()
+            title = str(reminder.get("title") or "").strip()
+            if not reminder_key or not title:
+                continue
+            payload_rows.append(
+                {
+                    "student_id": student_id,
+                    "course_id": course_id,
+                    "reminder_key": reminder_key,
+                    "reminder_type": reminder.get("reminder_type") or "custom",
+                    "title": title,
+                    "due_at": reminder.get("due_at"),
+                    "status": reminder.get("status") or "pending",
+                    "source": reminder.get("source"),
+                    "topic": reminder.get("topic"),
+                    "metadata": {
+                        "local_course_id": reminder.get("course_id"),
+                        "course_name": reminder.get("course_name"),
+                        "language": reminder.get("language"),
+                        "original_due_date": reminder.get("original_due_date"),
+                    },
+                }
+            )
+
+        if not payload_rows:
+            return 0
+
+        try:
+            self.client.table("reminders").upsert(
+                payload_rows,
+                on_conflict="student_id,course_id,reminder_key",
+            ).execute()
+            return len(payload_rows)
+        except Exception as exc:  # pragma: no cover - depends on external DB
+            raise MemoryRepositoryError(f"Failed to upsert reminders: {exc}") from exc
+
     def fetch_student_snapshot(self, *, student_id: str) -> dict[str, Any]:
         self._ensure_available()
 
@@ -311,6 +404,19 @@ class SupabaseMemoryRepository:
                 .data
                 or []
             )
+            try:
+                reminders = (
+                    self.client.table("reminders")
+                    .select("*")
+                    .eq("student_id", student_id)
+                    .order("due_at")
+                    .limit(25)
+                    .execute()
+                    .data
+                    or []
+                )
+            except Exception:
+                reminders = []
             return {
                 "profile": profile,
                 "courses": courses,
@@ -318,6 +424,7 @@ class SupabaseMemoryRepository:
                 "weak_topics": weak_topics,
                 "recent_quizzes": recent_quizzes,
                 "chat_summaries": chat_summaries,
+                "reminders": reminders,
             }
         except Exception as exc:  # pragma: no cover - depends on external DB
             raise MemoryRepositoryError(f"Failed to fetch student snapshot: {exc}") from exc

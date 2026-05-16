@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
@@ -8,6 +9,7 @@ from src.retrieval import CourseMaterialIndexer
 from src.tools.state import (
     add_course,
     clear_authenticated_user,
+    course_context,
     delete_course,
     get_active_course,
     get_authenticated_user,
@@ -30,6 +32,7 @@ from src.ui.login_page import render_login_page
 from src.ui.quiz_page import render_quiz_page
 from src.ui.signup_page import render_signup_page
 from src.ui.study_plan_page import render_study_plan_page
+from src.ui.settings_page import render_settings_page
 from src.ui.theme import inject_global_styles
 from src.ui.upload_page import render_upload_page
 
@@ -105,6 +108,11 @@ def main() -> None:
                 "label": t("page.progress_dashboard.label", language),
                 "hint": t("page.progress_dashboard.hint", language),
                 "handler": render_dashboard_page,
+            },
+            "settings": {
+                "label": t("page.settings.label", language),
+                "hint": t("page.settings.hint", language),
+                "handler": render_settings_page,
             },
             "account": {
                 "label": t("page.account.label", language),
@@ -211,6 +219,7 @@ def main() -> None:
                         st.success(t("nav.active_course_success", language, course_name=course["name"]))
                         st.rerun()
         _render_course_management(courses, active_course, language)
+        _render_reminder_notifications(language)
     pages[selected_page]["handler"](project_root=PROJECT_ROOT)
 
 
@@ -299,6 +308,51 @@ def _course_management_reason(reason: str, language: str) -> str:
         "duplicate_name": t("nav.duplicate_course_name", language),
         "missing_course": t("nav.course_missing", language),
     }.get(reason, reason)
+
+
+def _render_reminder_notifications(language: str) -> None:
+    context = course_context()
+    reminders = context.get("reminders", []) or []
+    now = datetime.now()
+    due_soon = now + timedelta(hours=24)
+    notifications = []
+    for reminder in reminders:
+        if not isinstance(reminder, dict) or reminder.get("status") == "done":
+            continue
+        due_at = _parse_reminder_datetime(reminder.get("due_at"))
+        if due_at is None or due_at > due_soon:
+            continue
+        notifications.append((due_at, reminder))
+
+    if not notifications:
+        return
+
+    with st.expander(t("dashboard.notifications", language), expanded=True):
+        for due_at, reminder in sorted(notifications, key=lambda item: item[0])[:5]:
+            message = t(
+                "dashboard.notification_due",
+                language,
+                course=reminder.get("course_name")
+                or context.get("active_course_name")
+                or t("course.none_selected", language),
+                title=reminder.get("title", ""),
+                due_at=due_at.strftime("%Y-%m-%d %H:%M"),
+            )
+            if due_at <= now:
+                st.warning(message)
+            else:
+                st.info(message)
+
+
+def _parse_reminder_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value[:16])
+    except ValueError:
+        return None
 
 
 def _load_language_from_profile_once(memory_agent, user: dict) -> None:

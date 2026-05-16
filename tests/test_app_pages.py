@@ -15,6 +15,7 @@ def test_app_starts_for_authenticated_pages() -> None:
         "upload_materials",
         "quiz",
         "progress_dashboard",
+        "settings",
         "account",
     ]
 

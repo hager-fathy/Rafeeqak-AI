@@ -278,6 +278,36 @@ class MemoryAgent:
         except MemoryRepositoryError as exc:
             return {"ok": False, "reason": str(exc)}
 
+    def sync_reminders(
+        self,
+        *,
+        course_name: str | None,
+        reminders: list[dict[str, Any]],
+        student_email: str | None = None,
+        student_name: str | None = None,
+    ) -> dict[str, Any]:
+        if not self.repository.is_available:
+            return {"ok": False, "reason": self.repository.unavailability_reason}
+
+        try:
+            profile = self._ensure_student_profile(email=student_email, full_name=student_name)
+            course_id = None
+            if course_name:
+                course = self.repository.upsert_course(
+                    student_id=profile["id"],
+                    course_name=str(course_name),
+                    syllabus_topics=[],
+                )
+                course_id = course["id"]
+            saved_count = self.repository.upsert_reminders(
+                student_id=profile["id"],
+                course_id=course_id,
+                reminders=reminders,
+            )
+            return {"ok": True, "student_id": profile["id"], "course_id": course_id, "saved_reminders": saved_count}
+        except MemoryRepositoryError as exc:
+            return {"ok": False, "reason": str(exc)}
+
     def get_preferred_language(
         self,
         *,
@@ -320,6 +350,36 @@ class MemoryAgent:
                 "student_id": profile["id"],
             }
         except MemoryRepositoryError as exc:
+            return {"ok": False, "reason": str(exc)}
+
+    def save_user_settings(
+        self,
+        *,
+        settings: dict[str, Any],
+        student_email: str | None = None,
+        student_name: str | None = None,
+    ) -> dict[str, Any]:
+        if not self.repository.is_available:
+            return {"ok": False, "reason": self.repository.unavailability_reason}
+
+        reminder_preferences = settings.get("reminder_preferences") if isinstance(settings, dict) else {}
+        try:
+            profile = self.repository.update_student_settings(
+                email=student_email,
+                full_name=settings.get("full_name") or student_name,
+                preferred_language=normalize_language(settings.get("preferred_language")),
+                daily_study_hours=float(settings.get("daily_study_hours") or 2.0),
+                quiz_preferences={
+                    "difficulty": settings.get("default_quiz_difficulty") or "medium",
+                    "question_types": settings.get("default_question_types") or ["mcq"],
+                },
+                difficulty_level=settings.get("default_course_difficulty") or "medium",
+                study_preferences={"study_preference": settings.get("study_preference") or "balanced"},
+                reminder_preferences=reminder_preferences if isinstance(reminder_preferences, dict) else {},
+            )
+            self._student_id = profile["id"]
+            return {"ok": True, "student_id": profile["id"], "profile": profile}
+        except (MemoryRepositoryError, TypeError, ValueError) as exc:
             return {"ok": False, "reason": str(exc)}
 
     def _ensure_student_profile(

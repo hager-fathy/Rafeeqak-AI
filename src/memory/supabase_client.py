@@ -23,6 +23,9 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover - handled by runt
 load_dotenv()
 
 
+PLACEHOLDER_VALUES = {"", "replace_me", "your_supabase_project_url", "your_supabase_publishable_key"}
+
+
 @dataclass(frozen=True)
 class SupabaseSettings:
     url: str | None
@@ -33,7 +36,12 @@ class SupabaseSettings:
 
     @property
     def is_configured(self) -> bool:
-        return bool(self.url and self.key)
+        return bool(
+            self.url
+            and self.key
+            and self.url.strip() not in PLACEHOLDER_VALUES
+            and self.key.strip() not in PLACEHOLDER_VALUES
+        )
 
 
 def get_supabase_settings() -> SupabaseSettings:
