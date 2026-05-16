@@ -10,17 +10,63 @@ from src.tools.state import (
     course_context,
     get_active_course,
     get_authenticated_user,
-    get_selected_language,
     get_memory_agent,
+    get_selected_language,
     get_supervisor_agent,
     touch_activity,
     update_active_course_bucket,
+    update_course_details,
 )
 from src.ui.theme import render_page_hero
 
 
 def _parse_topics(raw_text: str) -> list[str]:
     return [item.strip() for item in raw_text.split(",") if item.strip()]
+
+
+def _topic_text(topics: list[str]) -> str:
+    return ", ".join(topics)
+
+
+def _derived_weak_topics(current_context: dict) -> list[str]:
+    active_plan = current_context.get("active_plan") or {}
+    weak_topics = list(active_plan.get("weak_topics", []) or [])
+    seen = {topic.casefold() for topic in weak_topics}
+    for attempt in current_context.get("quiz_attempts", []) or []:
+        for topic in attempt.get("weak_topics", []) or []:
+            normalized = str(topic).strip()
+            if not normalized or normalized.casefold() in seen:
+                continue
+            weak_topics.append(normalized)
+            seen.add(normalized.casefold())
+    return weak_topics
+
+
+def _progress_snapshot(current_context: dict) -> dict:
+    active_plan = current_context.get("active_plan") or {}
+    tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
+    completed_tasks = [task for task in tasks if isinstance(task, dict) and task.get("completed")]
+    overdue_tasks = [
+        task
+        for task in tasks
+        if isinstance(task, dict)
+        and not task.get("completed")
+        and str(task.get("date", "")).strip()
+        and str(task["date"]) < date.today().isoformat()
+    ]
+    quiz_attempts = current_context.get("quiz_attempts", []) or []
+    average_score = 0.0
+    if quiz_attempts:
+        average_score = round(sum(float(item.get("score_percent", 0)) for item in quiz_attempts) / len(quiz_attempts), 1)
+    return {
+        "completed_tasks": len(completed_tasks),
+        "total_tasks": len(tasks),
+        "overdue_tasks": overdue_tasks,
+        "delayed_task_topics": [task.get("topic") for task in overdue_tasks if task.get("topic")],
+        "quiz_attempts": len(quiz_attempts),
+        "average_score": average_score,
+        "quiz_weak_topics": _derived_weak_topics(current_context),
+    }
 
 
 def _apply_completed_updates(active_plan: dict, edited_rows: list[dict]) -> bool:
@@ -59,6 +105,19 @@ def _same_plan_identity(left: dict, right: dict) -> bool:
     )
 
 
+def _default_exam_date(active_plan: dict | None) -> date:
+    if not isinstance(active_plan, dict):
+        return date.today() + timedelta(days=10)
+    raw_date = str(active_plan.get("exam_date") or "").strip()
+    if not raw_date:
+        return date.today() + timedelta(days=10)
+    try:
+        parsed = date.fromisoformat(raw_date)
+    except ValueError:
+        return date.today() + timedelta(days=10)
+    return max(parsed, date.today())
+
+
 def render_study_plan_page(project_root: Path) -> None:
     del project_root
     language = get_selected_language()
@@ -69,6 +128,17 @@ def render_study_plan_page(project_root: Path) -> None:
     student_name = (auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None
     active_course = get_active_course()
     current_context = course_context()
+    active_plan = current_context.get("active_plan")
+    derived_weak_topics = _derived_weak_topics(current_context)
+    progress_snapshot = _progress_snapshot(current_context)
+    course_difficulty = str((active_course or {}).get("difficulty", "Medium")).strip().lower()
+    default_difficulty = str((active_plan or {}).get("difficulty") or course_difficulty or "medium").lower()
+    if default_difficulty not in {"easy", "medium", "hard"}:
+        default_difficulty = "medium"
+    default_exam_date = _default_exam_date(active_plan)
+    default_window_days = max((default_exam_date - date.today()).days, 1)
+    default_lecture_count = int((active_plan or {}).get("lecture_count") or max(len(derived_weak_topics), 6))
+    default_finish_period = int((active_plan or {}).get("finish_period_days") or min(default_window_days, max(default_lecture_count, 1)))
 
     render_page_hero(
         t("planner.title", language),
@@ -95,22 +165,44 @@ def render_study_plan_page(project_root: Path) -> None:
                 )
                 exam_date = st.date_input(
                     t("planner.exam_date", language),
-                    value=date.today() + timedelta(days=10),
+                    value=default_exam_date,
                     min_value=date.today(),
+                )
+                difficulty = st.selectbox(
+                    t("planner.difficulty", language),
+                    options=["easy", "medium", "hard"],
+                    index=["easy", "medium", "hard"].index(default_difficulty),
+                    format_func=lambda value: t(f"quiz.difficulty.{value}", language),
+                )
+                lecture_count = st.number_input(
+                    t("planner.lecture_count", language),
+                    min_value=1,
+                    max_value=60,
+                    value=max(default_lecture_count, 1),
+                    step=1,
+                )
+                finish_period_days = st.number_input(
+                    t("planner.finish_period", language),
+                    min_value=1,
+                    max_value=max(default_window_days, 1),
+                    value=min(max(default_finish_period, 1), max(default_window_days, 1)),
+                    step=1,
                 )
                 daily_hours = st.number_input(
                     t("planner.daily_hours", language),
                     min_value=0.5,
                     max_value=12.0,
-                    value=2.0,
+                    value=float((active_plan or {}).get("daily_hours") or 2.0),
                     step=0.5,
                 )
                 weak_topics_input = st.text_input(
                     t("planner.weak_topics", language),
+                    value=_topic_text((active_plan or {}).get("weak_topics") or derived_weak_topics),
                     placeholder=t("planner.weak_placeholder", language),
                 )
                 other_topics_input = st.text_input(
                     t("planner.other_topics", language),
+                    value=_topic_text((active_plan or {}).get("other_topics") or []),
                     placeholder=t("planner.other_placeholder", language),
                 )
                 submit_plan = st.form_submit_button(t("planner.generate", language), use_container_width=True)
@@ -120,11 +212,36 @@ def render_study_plan_page(project_root: Path) -> None:
             st.markdown(f"#### {t('planner.insights', language)}")
             active_plan = current_context.get("active_plan")
             if active_plan:
-                total_tasks = len(active_plan["tasks"])
-                weak_count = len(active_plan["weak_topics"])
-                st.metric(t("planner.tasks_queued", language), total_tasks, border=True)
-                st.metric(t("planner.weak_tracked", language), weak_count, border=True)
+                plan_progress = active_plan.get("progress_snapshot", {})
+                st.metric(t("planner.tasks_queued", language), len(active_plan["tasks"]), border=True)
+                st.metric(t("planner.weak_tracked", language), len(active_plan["weak_topics"]), border=True)
                 st.metric(t("planner.hours_day", language), active_plan["daily_hours"], border=True)
+                st.metric(t("planner.delayed_tasks", language), active_plan.get("delayed_task_count", 0), border=True)
+                st.caption(
+                    t(
+                        "planner.plan_meta",
+                        language,
+                        difficulty=t(f"quiz.difficulty.{active_plan.get('difficulty', 'medium')}", language),
+                        lecture_count=active_plan.get("lecture_count", 0),
+                        finish_period=active_plan.get("finish_period_days", 0),
+                    )
+                )
+                if plan_progress:
+                    st.caption(
+                        t(
+                            "planner.progress_meta",
+                            language,
+                            completed=plan_progress.get("completed_tasks", 0),
+                            total=plan_progress.get("total_tasks", 0),
+                            rate=plan_progress.get("completion_rate", 0.0),
+                            quiz_average=plan_progress.get("average_score", 0.0),
+                        )
+                    )
+                recovery_recommendations = active_plan.get("recovery_recommendations", [])
+                if recovery_recommendations:
+                    st.markdown(f"##### {t('planner.recovery_title', language)}")
+                    for item in recovery_recommendations:
+                        st.caption(f"- {item}")
             else:
                 st.info(t("planner.no_insights", language))
             st.metric(
@@ -135,21 +252,26 @@ def render_study_plan_page(project_root: Path) -> None:
 
     if submit_plan:
         if active_course is None:
-            active_course = add_course(course_name)
+            active_course = add_course(course_name, difficulty=difficulty.title())
             current_context = course_context()
         if active_course is None:
             st.warning(t("planner.course_required", language))
             return
 
-        weak_topics = _parse_topics(weak_topics_input)
+        update_course_details(active_course["id"], difficulty=difficulty.title())
+        weak_topics = _parse_topics(weak_topics_input) or derived_weak_topics
         other_topics = _parse_topics(other_topics_input)
         plan_result = get_supervisor_agent().create_study_plan(
             {
                 "course_name": active_course["name"],
                 "exam_date": exam_date,
                 "daily_hours": daily_hours,
+                "difficulty": difficulty,
+                "lecture_count": int(lecture_count),
+                "finish_period_days": int(finish_period_days),
                 "weak_topics": weak_topics,
                 "other_topics": other_topics,
+                "progress": progress_snapshot,
                 "language": language,
             },
             memory_agent=memory_agent,
@@ -204,3 +326,4 @@ def render_study_plan_page(project_root: Path) -> None:
         )
         touch_activity()
         st.success(t("planner.timeline_saved", language))
+

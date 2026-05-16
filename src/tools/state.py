@@ -165,6 +165,22 @@ def rename_course(course_id: str, course_name: str) -> dict:
     return {"ok": True, "course": matching_course}
 
 
+def update_course_details(course_id: str, *, difficulty: str | None = None) -> dict:
+    courses = get_courses()
+    matching_course = next((course for course in courses if course["id"] == course_id), None)
+    if matching_course is None:
+        return {"ok": False, "reason": "missing_course"}
+
+    if difficulty is not None:
+        normalized_difficulty = str(difficulty).strip()
+        if normalized_difficulty:
+            matching_course["difficulty"] = normalized_difficulty
+
+    touch_activity()
+    _save_user_workspace()
+    return {"ok": True, "course": matching_course}
+
+
 def delete_course(course_id: str) -> dict:
     courses = get_courses()
     course = next((item for item in courses if item["id"] == course_id), None)

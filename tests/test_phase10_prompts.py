@@ -100,6 +100,8 @@ def test_required_phase10_templates_render() -> None:
         "recommendations": "practice chain rule",
         "exam_deadline": "2026-06-01",
         "daily_hours": 2,
+        "lecture_count": 8,
+        "finish_period": "5 day(s)",
         "progress": "No recorded progress yet.",
     }
     for template_name in expected:
@@ -162,10 +164,14 @@ def test_quiz_and_study_planner_use_prompt_templates() -> None:
             "weak_topics": ["Backpropagation"],
             "other_topics": ["Linear Regression"],
             "difficulty": "hard",
+            "lecture_count": 8,
+            "finish_period_days": 2,
             "language": "en",
         }
     )
 
     assert plan["generation_mode"] == "llm"
     assert "Difficulty: hard" in plan_llm.calls[0]["user_prompt"]
+    assert "Lecture count: 8" in plan_llm.calls[0]["user_prompt"]
+    assert "Finish lectures in: 2 day(s)" in plan_llm.calls[0]["user_prompt"]
     assert "Weak topics: Backpropagation" in plan_llm.calls[0]["user_prompt"]

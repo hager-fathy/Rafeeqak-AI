@@ -270,7 +270,13 @@ class SupervisorAgent:
                 "SupervisorAgent",
                 "received study-plan form data",
                 "completed",
-                {"course_name": profile.get("course_name"), "daily_hours": profile.get("daily_hours")},
+                {
+                    "course_name": profile.get("course_name"),
+                    "daily_hours": profile.get("daily_hours"),
+                    "difficulty": profile.get("difficulty"),
+                    "lecture_count": profile.get("lecture_count"),
+                    "finish_period_days": profile.get("finish_period_days"),
+                },
             ),
             self._trace_step(
                 "select_agent",
@@ -293,6 +299,8 @@ class SupervisorAgent:
                     "tasks": len(plan["tasks"]),
                     "weak_topics": plan["weak_topics"],
                     "exam_date": plan["exam_date"],
+                    "difficulty": plan.get("difficulty"),
+                    "lecture_count": plan.get("lecture_count"),
                 },
             )
         )
@@ -600,6 +608,9 @@ class SupervisorAgent:
             "exam_date": active_plan.get("exam_date") if isinstance(active_plan, dict) else None,
             "daily_hours": active_plan.get("daily_hours") if isinstance(active_plan, dict) else None,
             "difficulty": active_plan.get("difficulty") if isinstance(active_plan, dict) else None,
+            "lecture_count": active_plan.get("lecture_count") if isinstance(active_plan, dict) else None,
+            "finish_period_days": active_plan.get("finish_period_days") if isinstance(active_plan, dict) else None,
+            "delayed_task_count": active_plan.get("delayed_task_count") if isinstance(active_plan, dict) else None,
             "other_topics": active_plan.get("other_topics", []) if isinstance(active_plan, dict) else [],
             "tasks": self._stable_digest(
                 [

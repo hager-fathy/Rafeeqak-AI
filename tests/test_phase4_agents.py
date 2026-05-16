@@ -136,6 +136,64 @@ def test_study_planner_creates_adaptive_task_phases() -> None:
     assert any(task["checkpoint"] for task in tasks)
 
 
+def test_study_planner_adds_recovery_and_planning_metadata() -> None:
+    result = StudyPlannerAgent().generate(
+        {
+            "course_name": "Operating Systems",
+            "exam_date": date.today() + timedelta(days=5),
+            "daily_hours": 2,
+            "difficulty": "hard",
+            "lecture_count": 6,
+            "finish_period_days": 3,
+            "weak_topics": ["Scheduling"],
+            "other_topics": ["Deadlocks"],
+            "progress": {
+                "completed_tasks": 2,
+                "total_tasks": 5,
+                "overdue_tasks": [
+                    {"topic": "Processes", "date": (date.today() - timedelta(days=1)).isoformat(), "completed": False}
+                ],
+                "quiz_attempts": 2,
+                "average_score": 62,
+                "quiz_weak_topics": ["Scheduling"],
+            },
+        }
+    )
+
+    plan = result["plan"]
+    assert plan["difficulty"] == "hard"
+    assert plan["lecture_count"] == 6
+    assert plan["finish_period_days"] == 3
+    assert plan["delayed_task_count"] == 1
+    assert plan["recovery_recommendations"]
+    assert plan["progress_snapshot"]["completion_rate"] == 40.0
+    assert plan["tasks"][0]["phase"] == "Recovery session"
+    assert "Processes" in plan["tasks"][0]["task"]
+
+
+def test_study_planner_uses_quiz_weak_topics_when_manual_topics_missing() -> None:
+    result = StudyPlannerAgent().generate(
+        {
+            "course_name": "Networks",
+            "exam_date": date.today() + timedelta(days=4),
+            "daily_hours": 1.5,
+            "lecture_count": 4,
+            "finish_period_days": 2,
+            "weak_topics": [],
+            "other_topics": ["Routing"],
+            "progress": {
+                "quiz_weak_topics": ["Subnetting", "Routing"],
+                "quiz_attempts": 1,
+                "average_score": 58,
+            },
+        }
+    )
+
+    plan = result["plan"]
+    assert plan["weak_topics"][0] == "Subnetting"
+    assert plan["tasks"][0]["topic"] == "Subnetting"
+
+
 def test_study_planner_uses_llm_when_available() -> None:
     result = StudyPlannerAgent(llm_client=FakePlanLLM()).generate(
         {
@@ -144,6 +202,8 @@ def test_study_planner_uses_llm_when_available() -> None:
             "daily_hours": 2,
             "weak_topics": ["Indexes"],
             "other_topics": ["Transactions"],
+            "lecture_count": 5,
+            "finish_period_days": 2,
         }
     )
 

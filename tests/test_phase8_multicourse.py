@@ -11,6 +11,7 @@ from src.tools.state import (
     set_authenticated_user,
     rename_course,
     set_active_course,
+    update_course_details,
     update_active_course_bucket,
 )
 
@@ -140,6 +141,16 @@ def test_workspace_persists_for_same_email(tmp_path, monkeypatch) -> None:
     assert restored["reminders"][0]["title"] == "review clustering"
     assert restored["uploads"][0]["stored_name"] == "notes.txt"
     assert restored["active_plan"]["weak_topics"] == ["k-means"]
+
+
+def test_course_difficulty_update_is_reflected_in_summary() -> None:
+    init_state()
+    course = add_course("Compilers")
+
+    result = update_course_details(course["id"], difficulty="Hard")
+
+    assert result["ok"] is True
+    assert course_context()["all_courses"][0]["difficulty"] == "Hard"
 
 
 def test_course_material_indexer_can_rename_and_remove_course(tmp_path) -> None:

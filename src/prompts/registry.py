@@ -25,6 +25,8 @@ TEMPLATE_VARIABLES: dict[str, set[str]] = {
         "difficulty",
         "exam_deadline",
         "daily_hours",
+        "lecture_count",
+        "finish_period",
         "progress",
         "weak_topics",
         "language",

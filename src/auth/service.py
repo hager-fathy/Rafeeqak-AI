@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from supabase_auth.errors import AuthApiError, AuthError, AuthWeakPasswordError
+try:
+    from supabase_auth.errors import AuthApiError, AuthError, AuthWeakPasswordError
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - optional runtime dependency guard
+    class AuthError(Exception):
+        pass
+
+    class AuthApiError(AuthError):
+        pass
+
+    class AuthWeakPasswordError(AuthError):
+        pass
 
 from src.memory.supabase_client import get_supabase_client, get_supabase_settings
 

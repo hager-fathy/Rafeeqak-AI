@@ -12,9 +12,12 @@ try:
     from supabase import Client, ClientOptions, create_client
 except (ImportError, ModuleNotFoundError):  # pragma: no cover - handled by runtime checks
     Client = Any  # type: ignore[misc,assignment]
-    ClientOptions = None  # type: ignore[assignment]
     create_client = None  # type: ignore[assignment]
-    httpx = None  # type: ignore[assignment]
+    import httpx
+
+    class ClientOptions:  # type: ignore[override]
+        def __init__(self, *, httpx_client: Any) -> None:
+            self.httpx_client = httpx_client
 
 
 load_dotenv()

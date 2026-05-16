@@ -2,8 +2,10 @@ Course: {{course_name}}
 Difficulty: {{difficulty}}
 Exam deadline: {{exam_deadline}}
 Available hours per day: {{daily_hours}}
+Lecture count: {{lecture_count}}
+Finish lectures in: {{finish_period}}
 Current progress: {{progress}}
 Weak topics: {{weak_topics}}
 Language: {{language}}
 
-Use weak topics more often than regular topics. Include checkpoint quiz days and final review.
+Use weak topics more often than regular topics. Include checkpoint quiz days, delayed-task recovery when needed, and final review.
