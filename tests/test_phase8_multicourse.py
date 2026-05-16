@@ -106,12 +106,12 @@ def test_plan_timeline_completion_updates_active_plan_and_history() -> None:
 def test_legacy_course_bucket_missing_key_gets_default() -> None:
     init_state()
     course = add_course("Operating Systems")
-    st.session_state["course_data"][course["id"]].pop("current_quiz")
-    st.session_state["current_quiz"] = {"legacy": True}
+    st.session_state["course_data"][course["id"]].pop("active_quiz")
+    st.session_state["active_quiz"] = {"legacy": True}
 
     set_active_course(course["id"])
 
-    assert st.session_state["current_quiz"] is None
+    assert st.session_state["active_quiz"] is None
     assert course_context()["chat_history"] == []
 
 

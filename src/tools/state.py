@@ -19,13 +19,15 @@ COURSE_SCOPED_KEYS = (
     "study_plans",
     "active_plan",
     "quiz_attempts",
-    "current_quiz",
+    "active_quiz",
     "last_quiz_feedback",
     "quiz_generation_status",
     "reminders",
     "uploads",
     "generated_questions",
 )
+
+LEGACY_QUIZ_KEYS = ("current_quiz", "generated_quiz", "quiz")
 
 WORKSPACE_VERSION = 1
 VALID_DIFFICULTIES = {"easy", "medium", "hard"}
@@ -41,7 +43,7 @@ def _empty_course_bucket() -> dict:
         "study_plans": [],
         "active_plan": None,
         "quiz_attempts": [],
-        "current_quiz": None,
+        "active_quiz": None,
         "last_quiz_feedback": None,
         "quiz_generation_status": None,
         "reminders": [],
@@ -75,6 +77,12 @@ def _normalize_course_bucket(bucket: dict | None) -> dict:
             value = bucket.get(key)
             if value is not None:
                 normalized[key] = value
+        if normalized["active_quiz"] is None:
+            for legacy_key in LEGACY_QUIZ_KEYS:
+                legacy_quiz = bucket.get(legacy_key)
+                if legacy_quiz is not None:
+                    normalized["active_quiz"] = legacy_quiz
+                    break
     return normalized
 
 
@@ -117,7 +125,7 @@ def init_state() -> None:
         "study_plans": [],
         "active_plan": None,
         "quiz_attempts": [],
-        "current_quiz": None,
+        "active_quiz": None,
         "last_quiz_feedback": None,
         "quiz_generation_status": None,
         "reminders": [],
@@ -322,11 +330,13 @@ def sync_active_course_aliases() -> None:
     if active_course is None:
         for key, value in _empty_course_bucket().items():
             st.session_state[key] = value
+        _drop_legacy_quiz_aliases()
         return
 
     bucket = get_active_course_bucket()
     for key in COURSE_SCOPED_KEYS:
         st.session_state[key] = bucket[key]
+    _drop_legacy_quiz_aliases()
 
 
 def update_active_course_bucket(**values: object) -> None:
@@ -340,6 +350,11 @@ def update_active_course_bucket(**values: object) -> None:
             bucket[key] = value
             st.session_state[key] = value
     _save_user_workspace()
+
+
+def _drop_legacy_quiz_aliases() -> None:
+    for key in LEGACY_QUIZ_KEYS:
+        st.session_state.pop(key, None)
 
 
 def get_user_settings() -> dict:
@@ -395,6 +410,8 @@ def course_context() -> dict:
         "active_plan": bucket.get("active_plan"),
         "study_plans": bucket.get("study_plans", []),
         "quiz_attempts": bucket.get("quiz_attempts", []),
+        "active_quiz": bucket.get("active_quiz"),
+        "last_quiz_feedback": bucket.get("last_quiz_feedback"),
         "quiz_generation_status": bucket.get("quiz_generation_status"),
         "reminders": bucket.get("reminders", []),
         "uploads": bucket.get("uploads", []),
@@ -411,7 +428,8 @@ def course_context() -> dict:
 
 
 def _migrate_legacy_course_state() -> None:
-    if st.session_state.get("courses") or not any(st.session_state.get(key) for key in COURSE_SCOPED_KEYS):
+    legacy_keys = COURSE_SCOPED_KEYS + LEGACY_QUIZ_KEYS
+    if st.session_state.get("courses") or not any(st.session_state.get(key) for key in legacy_keys):
         return
 
     course_name = "General Studies"
@@ -436,6 +454,12 @@ def _migrate_legacy_course_state() -> None:
             for key in COURSE_SCOPED_KEYS
         }
     }
+    if st.session_state["course_data"][course_id]["active_quiz"] is None:
+        for legacy_key in LEGACY_QUIZ_KEYS:
+            legacy_quiz = st.session_state.get(legacy_key)
+            if legacy_quiz is not None:
+                st.session_state["course_data"][course_id]["active_quiz"] = deepcopy(legacy_quiz)
+                break
 
 
 def _course_id(course_name: str) -> str:
@@ -592,9 +616,9 @@ def _rename_course_references(course_id: str, course_name: str) -> None:
     if isinstance(active_plan, dict):
         active_plan["course_name"] = course_name
 
-    current_quiz = bucket.get("current_quiz")
-    if isinstance(current_quiz, dict):
-        current_quiz["course_name"] = course_name
+    active_quiz = bucket.get("active_quiz")
+    if isinstance(active_quiz, dict):
+        active_quiz["course_name"] = course_name
 
 
 def _save_user_workspace() -> dict:

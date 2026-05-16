@@ -1,16 +1,20 @@
+import streamlit as st
+
 from src.agents.progress_evaluator import ProgressEvaluatorAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
 from src.agents.supervisor import SupervisorAgent
 from src.retrieval import CourseMaterialIndexer
 from src.tools.semantic_cache import SemanticResponseCache
-from src.tools.state import _normalize_course_bucket
+from src.tools.state import add_course, course_context, init_state, _normalize_course_bucket
 from src.ui.quiz_page import (
+    _active_quiz,
     _can_retry_quiz_generation,
-    _current_quiz,
     _quiz_generation_request,
     _quiz_generation_status,
     _quiz_generation_status_payload,
+    _record_attempt,
     _retry_quiz_generation_request,
+    _store_generated_quiz,
     generate_quiz_from_course_materials,
 )
 
@@ -56,6 +60,15 @@ class DuplicateQuizLLM:
             ],
             "flashcards": [],
         }
+
+
+class FakeMemoryAgent:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def record_quiz_attempt(self, **kwargs) -> dict:
+        self.calls.append(kwargs)
+        return {"ok": False, "reason": "local test memory"}
 
 
 def test_quiz_generator_creates_topic_questions_and_flashcards() -> None:
@@ -244,7 +257,8 @@ def test_quiz_page_rejects_topics_not_found_in_uploaded_materials(tmp_path) -> N
     assert result["reason"] == "material_match_required"
 
 
-def test_current_quiz_uses_fresh_generation_fallback() -> None:
+def test_active_quiz_uses_fresh_generation_fallback() -> None:
+    st.session_state.clear()
     fallback = {
         "topic": "inverted indexes",
         "language": "en",
@@ -253,7 +267,90 @@ def test_current_quiz_uses_fresh_generation_fallback() -> None:
         "source_count": 1,
     }
 
-    assert _current_quiz(fallback=fallback) == fallback
+    assert _active_quiz(fallback=fallback) == fallback
+
+
+def test_generated_quiz_is_saved_as_active_quiz_without_counting_attempt() -> None:
+    st.session_state.clear()
+    init_state()
+    course = add_course("Information Retrieval")
+    request = _quiz_generation_request(
+        topic="inverted indexes",
+        count=2,
+        language="en",
+        difficulty="hard",
+        question_types=["mcq", "true_false"],
+        course_id=course["id"],
+        course_name=course["name"],
+    )
+    quiz_result = QuizGeneratorAgent().generate(
+        topic="inverted indexes",
+        count=2,
+        difficulty="hard",
+        question_types=["mcq", "true_false"],
+    )
+
+    active_quiz = _store_generated_quiz(
+        quiz_result=quiz_result,
+        generation_request=request,
+        context_chunks=[{"source_name": "ir_notes.txt", "section": "text"}],
+        previous_generated_questions=["old question"],
+    )
+    context = course_context()
+
+    assert context["active_quiz"] == active_quiz
+    assert st.session_state["active_quiz"] == active_quiz
+    assert _active_quiz() == active_quiz
+    assert context["quiz_attempts"] == []
+    assert active_quiz["course_id"] == course["id"]
+    assert active_quiz["course_name"] == course["name"]
+    assert active_quiz["difficulty"] == "hard"
+    assert active_quiz["question_types"] == ["mcq", "true_false"]
+    assert active_quiz["requested_count"] == 2
+    assert active_quiz["source_count"] == 1
+    assert context["quiz_generation_status"]["status"] == "generated"
+
+
+def test_record_attempt_updates_course_attempts_average_and_weak_topics(monkeypatch) -> None:
+    st.session_state.clear()
+    init_state()
+    course = add_course("Machine Learning")
+    quiz = QuizGeneratorAgent().generate(topic="SVM", count=1, difficulty="medium")["quiz"]
+    question = quiz["questions"][0]
+    wrong_answer = (question["answer_index"] + 1) % len(question["options"])
+    evaluation = ProgressEvaluatorAgent().evaluate(
+        questions=quiz["questions"],
+        answers=[wrong_answer],
+        topic=quiz["topic"],
+    )
+    memory_agent = FakeMemoryAgent()
+    monkeypatch.setattr(st, "info", lambda *args, **kwargs: None)
+    monkeypatch.setattr(st, "warning", lambda *args, **kwargs: None)
+
+    _record_attempt(
+        evaluation=evaluation,
+        quiz=quiz,
+        active_plan=None,
+        active_course=course,
+        memory_agent=memory_agent,
+        student_email="student@example.com",
+        student_name="Demo Student",
+        language="en",
+    )
+    context = course_context()
+    attempt = context["quiz_attempts"][0]
+
+    assert len(context["quiz_attempts"]) == 1
+    assert attempt["course_id"] == course["id"]
+    assert attempt["difficulty"] == "medium"
+    assert attempt["question_count"] == 1
+    assert attempt["question_types"] == ["mcq"]
+    assert attempt["score_percent"] == evaluation["score_percent"]
+    assert attempt["weak_topics"] == ["SVM"]
+    assert context["all_courses"][0]["quiz_attempts"] == 1
+    assert context["all_courses"][0]["average_score"] == evaluation["score_percent"]
+    assert context["all_courses"][0]["weak_topics"] == ["SVM"]
+    assert memory_agent.calls[0]["course_name"] == course["name"]
 
 
 def test_quiz_generation_status_payload_supports_retry() -> None:
@@ -313,6 +410,15 @@ def test_course_bucket_preserves_quiz_generation_status() -> None:
     normalized = _normalize_course_bucket({"quiz_generation_status": status})
 
     assert normalized["quiz_generation_status"] == status
+
+
+def test_course_bucket_migrates_legacy_current_quiz_to_active_quiz() -> None:
+    legacy_quiz = {"topic": "legacy", "questions": [{"question": "old"}]}
+
+    normalized = _normalize_course_bucket({"current_quiz": legacy_quiz})
+
+    assert normalized["active_quiz"] == legacy_quiz
+    assert "current_quiz" not in normalized
 
 
 def test_progress_evaluator_scores_answers_and_flags_weak_topic() -> None:

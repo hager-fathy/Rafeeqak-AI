@@ -65,7 +65,7 @@ def render_quiz_page(project_root: Path) -> None:
     if course_warning:
         st.info(course_warning)
 
-    generated_quiz_for_render: dict[str, Any] | None = None
+    active_quiz_for_render: dict[str, Any] | None = None
     setup_col, history_col = st.columns([1.6, 1], gap="large")
 
     with setup_col:
@@ -104,17 +104,18 @@ def render_quiz_page(project_root: Path) -> None:
     with history_col:
         with st.container(border=True):
             st.markdown(f"#### {t('quiz.performance', language)}")
-            st.metric(t("dashboard.quiz_attempts", language), len(attempts), border=True)
-            st.metric(t("quiz.average", language), f"{average_score}%", border=True)
-            if attempts:
-                last_score = attempts[-1]["score_percent"]
-                st.metric(t("quiz.last_score", language), f"{last_score}%", border=True)
-            else:
-                st.info(t("quiz.no_attempts", language))
-            st.metric(
-                t("planner.supabase_memory", language),
-                t("common.connected", language) if memory_status["enabled"] else t("common.not_configured", language),
-                border=True,
+            attempts_metric = st.empty()
+            average_metric = st.empty()
+            last_score_slot = st.empty()
+            memory_metric = st.empty()
+            _render_performance_snapshot(
+                attempts=attempts,
+                language=language,
+                memory_status=memory_status,
+                attempts_metric=attempts_metric,
+                average_metric=average_metric,
+                last_score_slot=last_score_slot,
+                memory_metric=memory_metric,
             )
 
     status_before_generation = _quiz_generation_status(current_context.get("quiz_generation_status"))
@@ -173,7 +174,7 @@ def render_quiz_page(project_root: Path) -> None:
 
         if not generation_result["ok"]:
             update_active_course_bucket(
-                current_quiz=None,
+                active_quiz=None,
                 last_quiz_feedback=None,
                 quiz_generation_status=_quiz_generation_status_payload(
                     "failed",
@@ -188,25 +189,17 @@ def render_quiz_page(project_root: Path) -> None:
 
         quiz_result = generation_result["quiz_result"]
         context_chunks = generation_result["context_chunks"]
-        generated_quiz_for_render = quiz_result["quiz"]
-        generated_questions = current_context.get("generated_questions", [])
-        generated_questions.extend(question["question"] for question in quiz_result["questions"])
-        update_active_course_bucket(
-            current_quiz=generated_quiz_for_render,
-            last_quiz_feedback=None,
-            generated_questions=generated_questions[-120:],
-            quiz_generation_status=_quiz_generation_status_payload(
-                "generated",
-                request=generation_request,
-                source_count=len(context_chunks),
-                question_count=len(quiz_result["questions"]),
-            ),
+        active_quiz_for_render = _store_generated_quiz(
+            quiz_result=quiz_result,
+            generation_request=generation_request,
+            context_chunks=context_chunks,
+            previous_generated_questions=current_context.get("generated_questions", []),
         )
         touch_activity()
 
     _render_quiz_generation_status(course_context().get("quiz_generation_status"), language)
 
-    quiz = _current_quiz(fallback=generated_quiz_for_render)
+    quiz = _active_quiz(fallback=active_quiz_for_render)
     if not quiz:
         st.info(t("quiz.no_quiz", language))
         return
@@ -243,6 +236,7 @@ def render_quiz_page(project_root: Path) -> None:
         if evaluation["ok"]:
             _record_attempt(
                 evaluation=evaluation,
+                quiz=quiz,
                 active_plan=active_plan,
                 active_course=active_course,
                 memory_agent=memory_agent,
@@ -251,8 +245,15 @@ def render_quiz_page(project_root: Path) -> None:
                 language=language,
             )
             touch_activity()
-            st.success(evaluation["summary"])
-            st.info(evaluation["recommendation"])
+            _render_performance_snapshot(
+                attempts=course_context().get("quiz_attempts", []),
+                language=language,
+                memory_status=memory_status,
+                attempts_metric=attempts_metric,
+                average_metric=average_metric,
+                last_score_slot=last_score_slot,
+                memory_metric=memory_metric,
+            )
         else:
             st.warning(evaluation["message"])
 
@@ -261,9 +262,34 @@ def render_quiz_page(project_root: Path) -> None:
     _render_attempt_history(course_context().get("quiz_attempts", []), language)
 
 
+def _render_performance_snapshot(
+    *,
+    attempts: list[dict[str, Any]],
+    language: str,
+    memory_status: dict[str, Any],
+    attempts_metric: Any,
+    average_metric: Any,
+    last_score_slot: Any,
+    memory_metric: Any,
+) -> None:
+    average_score = round(sum(item["score_percent"] for item in attempts) / len(attempts), 1) if attempts else 0.0
+    attempts_metric.metric(t("dashboard.quiz_attempts", language), len(attempts), border=True)
+    average_metric.metric(t("quiz.average", language), f"{average_score}%", border=True)
+    if attempts:
+        last_score_slot.metric(t("quiz.last_score", language), f"{attempts[-1]['score_percent']}%", border=True)
+    else:
+        last_score_slot.info(t("quiz.no_attempts", language))
+    memory_metric.metric(
+        t("planner.supabase_memory", language),
+        t("common.connected", language) if memory_status["enabled"] else t("common.not_configured", language),
+        border=True,
+    )
+
+
 def _record_attempt(
     *,
     evaluation: dict[str, Any],
+    quiz: dict[str, Any] | None,
     active_plan: dict[str, Any] | None,
     active_course: dict[str, Any] | None,
     memory_agent: Any,
@@ -271,7 +297,8 @@ def _record_attempt(
     student_name: str | None,
     language: str,
 ) -> None:
-    attempts = course_context().get("quiz_attempts", [])
+    attempts = list(course_context().get("quiz_attempts", []))
+    quiz_metadata = quiz if isinstance(quiz, dict) else {}
     attempts.append(
         {
             "course_id": active_course["id"] if active_course else None,
@@ -281,8 +308,11 @@ def _record_attempt(
             "correct": evaluation["correct"],
             "total": evaluation["total"],
             "score_percent": evaluation["score_percent"],
-            "difficulty": evaluation.get("difficulty"),
-            "question_types": sorted({item["type"] for item in evaluation["feedback"]}),
+            "difficulty": quiz_metadata.get("difficulty") or evaluation.get("difficulty"),
+            "question_count": len(quiz_metadata.get("questions", [])) or evaluation["total"],
+            "question_types": quiz_metadata.get("question_types")
+            or sorted({item["type"] for item in evaluation["feedback"]}),
+            "quiz_generated_at_utc": quiz_metadata.get("generated_at_utc"),
             "points_earned": evaluation["points_earned"],
             "total_points": evaluation["total_points"],
             "weak_topics": [item["topic"] for item in evaluation["weak_topics"]],
@@ -314,6 +344,9 @@ def _record_attempt(
 def _render_feedback(evaluation: dict[str, Any] | None, language: str) -> None:
     if not evaluation or not evaluation.get("ok"):
         return
+
+    st.success(evaluation["summary"])
+    st.info(evaluation["recommendation"])
 
     question_prefix = "س" if language == "ar" else "Q"
     with st.expander(t("quiz.feedback", language), expanded=True):
@@ -377,11 +410,46 @@ def _render_attempt_history(attempts: list[dict[str, Any]], language: str) -> No
         st.dataframe(history_df, use_container_width=True, hide_index=True)
 
 
-def _current_quiz(*, fallback: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    quiz = course_context().get("current_quiz")
+def _active_quiz(*, fallback: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    quiz = course_context().get("active_quiz")
     if isinstance(quiz, list):
         return {"topic": "Legacy quiz", "language": "en", "questions": quiz, "flashcards": [], "source_count": 0}
     return quiz if isinstance(quiz, dict) else fallback
+
+
+def _store_generated_quiz(
+    *,
+    quiz_result: dict[str, Any],
+    generation_request: dict[str, Any],
+    context_chunks: list[dict[str, Any]],
+    previous_generated_questions: list[str],
+) -> dict[str, Any]:
+    questions = quiz_result.get("questions", [])
+    active_quiz = {
+        **quiz_result["quiz"],
+        "course_id": generation_request.get("course_id"),
+        "course_name": generation_request.get("course_name"),
+        "difficulty": generation_request["difficulty"],
+        "question_types": list(generation_request["question_types"]),
+        "requested_count": int(generation_request["count"]),
+        "questions": questions,
+        "flashcards": quiz_result.get("flashcards") or quiz_result["quiz"].get("flashcards", []),
+        "source_count": len(context_chunks),
+    }
+    generated_questions = list(previous_generated_questions or [])
+    generated_questions.extend(str(question.get("question", "")) for question in questions if question.get("question"))
+    update_active_course_bucket(
+        active_quiz=active_quiz,
+        last_quiz_feedback=None,
+        generated_questions=generated_questions[-120:],
+        quiz_generation_status=_quiz_generation_status_payload(
+            "generated",
+            request=generation_request,
+            source_count=len(context_chunks),
+            question_count=len(questions),
+        ),
+    )
+    return active_quiz
 
 
 def _quiz_generation_request(

@@ -31,7 +31,7 @@ def _assistant_reply(user_message: str) -> str:
         generated_questions = context.get("generated_questions", [])
         generated_questions.extend(question["question"] for question in result["payload"].get("questions", []))
         update_active_course_bucket(
-            current_quiz=result["payload"]["quiz"],
+            active_quiz=result["payload"]["quiz"],
             last_quiz_feedback=None,
             generated_questions=generated_questions[-120:],
         )
