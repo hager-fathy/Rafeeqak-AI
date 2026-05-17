@@ -66,13 +66,18 @@ def render_dashboard_page(project_root: Path) -> None:
         language=language,
     )
 
-    metric_cols = st.columns(6)
-    metric_cols[0].metric(t("dashboard.all_courses", language), overall["courses"], border=True)
-    metric_cols[1].metric(t("dashboard.completed_tasks", language), overall["completed_tasks"], border=True)
-    metric_cols[2].metric(t("dashboard.upcoming_tasks", language), overall["upcoming_tasks"], border=True)
-    metric_cols[3].metric(t("dashboard.average_score", language), f"{overall['average_score']}%", border=True)
-    metric_cols[4].metric(t("dashboard.uploads", language), overall["uploads"], border=True)
-    metric_cols[5].metric(t("dashboard.reminders", language), overall["pending_reminders"], border=True)
+    metric_items = [
+        (t("dashboard.all_courses", language), overall["courses"]),
+        (t("dashboard.completed_tasks", language), overall["completed_tasks"]),
+        (t("dashboard.upcoming_tasks", language), overall["upcoming_tasks"]),
+        (t("dashboard.average_score", language), f"{overall['average_score']}%"),
+        (t("dashboard.uploads", language), overall["uploads"]),
+        (t("dashboard.reminders", language), overall["pending_reminders"]),
+    ]
+    for offset in range(0, len(metric_items), 3):
+        metric_cols = st.columns(3, gap="small", vertical_alignment="center")
+        for col, (label, value) in zip(metric_cols, metric_items[offset : offset + 3]):
+            col.metric(label, value, border=True)
 
     st.caption(
         t("dashboard.memory_connected", language)
@@ -144,41 +149,42 @@ def _render_course_overview(all_courses: list[dict[str, Any]], language: str) ->
         return
 
     rows = build_dashboard_course_rows(all_courses)
-    card_cols = st.columns(3)
-    for index, course in enumerate(all_courses):
-        with card_cols[index % 3].container(border=True):
-            st.markdown(f"#### {course['course_name']}")
-            progress = float(course.get("completion_rate") or 0.0)
-            st.progress(min(max(progress / 100.0, 0.0), 1.0))
-            st.caption(
-                t(
-                    "dashboard.course_progress",
-                    language,
-                    completed=course.get("completed_tasks", 0),
-                    total=course.get("total_tasks", 0),
-                    percent=progress,
+    with st.container(height=380, border=False, key="dashboard_course_cards"):
+        card_cols = st.columns(3, gap="small", vertical_alignment="top")
+        for index, course in enumerate(all_courses):
+            with card_cols[index % 3].container(border=True):
+                st.markdown(f"#### {course['course_name']}")
+                progress = float(course.get("completion_rate") or 0.0)
+                st.progress(min(max(progress / 100.0, 0.0), 1.0))
+                st.caption(
+                    t(
+                        "dashboard.course_progress",
+                        language,
+                        completed=course.get("completed_tasks", 0),
+                        total=course.get("total_tasks", 0),
+                        percent=progress,
+                    )
                 )
-            )
-            next_task = course.get("next_task") if isinstance(course.get("next_task"), dict) else None
-            if next_task:
-                st.caption(t("dashboard.next_task", language, topic=next_task.get("topic"), date=next_task.get("date")))
-            else:
-                st.caption(t("dashboard.no_next_task", language))
-            st.caption(
-                t("dashboard.deadline", language, date=course.get("exam_date"))
-                if course.get("exam_date")
-                else t("dashboard.no_deadline", language)
-            )
-            weak_topics = course.get("weak_topics", [])
-            st.caption(
-                t("dashboard.weak_topics_inline", language, topics=", ".join(weak_topics[:4]))
-                if weak_topics
-                else t("dashboard.no_weak_topics_inline", language)
-            )
-            st.metric(t("dashboard.average_score", language), f"{course.get('average_score', 0.0)}%", border=True)
-            st.caption(t("dashboard.pending_reminders", language, count=course.get("pending_reminders", 0)))
+                next_task = course.get("next_task") if isinstance(course.get("next_task"), dict) else None
+                if next_task:
+                    st.caption(t("dashboard.next_task", language, topic=next_task.get("topic"), date=next_task.get("date")))
+                else:
+                    st.caption(t("dashboard.no_next_task", language))
+                st.caption(
+                    t("dashboard.deadline", language, date=course.get("exam_date"))
+                    if course.get("exam_date")
+                    else t("dashboard.no_deadline", language)
+                )
+                weak_topics = course.get("weak_topics", [])
+                st.caption(
+                    t("dashboard.weak_topics_inline", language, topics=", ".join(weak_topics[:4]))
+                    if weak_topics
+                    else t("dashboard.no_weak_topics_inline", language)
+                )
+                st.metric(t("dashboard.average_score", language), f"{course.get('average_score', 0.0)}%", border=True)
+                st.caption(t("dashboard.pending_reminders", language, count=course.get("pending_reminders", 0)))
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=300)
 
 
 def _render_active_course_panels(current_context: dict[str, Any], language: str) -> None:
@@ -188,15 +194,20 @@ def _render_active_course_panels(current_context: dict[str, Any], language: str)
     upcoming_tasks = [task for task in tasks if isinstance(task, dict) and not is_task_completed(task, active_plan)]
     deadline = active_plan.get("exam_date") if isinstance(active_plan, dict) else None
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric(t("dashboard.plans_created", language), len(current_context.get("study_plans", [])), border=True)
-    col2.metric(t("dashboard.completed_tasks", language), len(completed_tasks), border=True)
-    col3.metric(t("dashboard.upcoming_tasks", language), len(upcoming_tasks), border=True)
-    col4.metric(t("dashboard.quiz_attempts", language), len(current_context.get("quiz_attempts", [])), border=True)
-    col5.metric(t("dashboard.uploaded_files", language), len(current_context.get("uploads", [])), border=True)
-    col6.metric(t("dashboard.deadlines", language), deadline or t("dashboard.no_deadline", language), border=True)
+    metric_items = [
+        (t("dashboard.plans_created", language), len(current_context.get("study_plans", []))),
+        (t("dashboard.completed_tasks", language), len(completed_tasks)),
+        (t("dashboard.upcoming_tasks", language), len(upcoming_tasks)),
+        (t("dashboard.quiz_attempts", language), len(current_context.get("quiz_attempts", []))),
+        (t("dashboard.uploaded_files", language), len(current_context.get("uploads", []))),
+        (t("dashboard.deadlines", language), deadline or t("dashboard.no_deadline", language)),
+    ]
+    for offset in range(0, len(metric_items), 3):
+        metric_cols = st.columns(3, gap="small", vertical_alignment="center")
+        for col, (label, value) in zip(metric_cols, metric_items[offset : offset + 3]):
+            col.metric(label, value, border=True)
 
-    task_cols = st.columns(2, gap="large")
+    task_cols = st.columns(2, gap="large", vertical_alignment="top")
     with task_cols[0]:
         st.markdown(f"#### {t('dashboard.completed_tasks', language)}")
         _render_task_table(completed_tasks[-8:], language)
@@ -210,7 +221,7 @@ def _render_task_table(tasks: list[dict[str, Any]], language: str) -> None:
         st.info(t("dashboard.no_next_task", language))
         return
     columns = [column for column in ["date", "topic", "phase", "hours", "checkpoint"] if column in tasks[0]]
-    st.dataframe(pd.DataFrame(tasks)[columns], use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(tasks)[columns], use_container_width=True, hide_index=True, height=260)
 
 
 def _render_reminder_panel(
@@ -222,7 +233,7 @@ def _render_reminder_panel(
     language: str,
 ) -> None:
     st.markdown(f"### {t('dashboard.upcoming_reminders', language)}")
-    refresh_col, _ = st.columns([1, 3])
+    refresh_col, _ = st.columns([1, 3], vertical_alignment="center")
     with refresh_col:
         if st.button(
             t("dashboard.refresh_reminders", language),
@@ -251,16 +262,23 @@ def _render_reminder_panel(
     due_rows = due_reminder_rows(pending_reminders)
     if due_rows:
         st.markdown(f"#### {t('dashboard.notifications', language)}")
-        for reminder in due_rows[:5]:
-            st.warning(
-                t(
-                    "dashboard.notification_due",
-                    language,
-                    course=reminder.get("course_name") or current_context.get("active_course_name"),
-                    title=reminder.get("title"),
-                    due_at=reminder.get("due_at"),
+        visible_alerts = due_rows[:5]
+        alert_panel = (
+            st.container(height=180, border=False, key="dashboard_alerts_panel")
+            if len(visible_alerts) > 2
+            else st.container()
+        )
+        with alert_panel:
+            for reminder in visible_alerts:
+                st.warning(
+                    t(
+                        "dashboard.notification_due",
+                        language,
+                        course=reminder.get("course_name") or current_context.get("active_course_name"),
+                        title=reminder.get("title"),
+                        due_at=reminder.get("due_at"),
+                    )
                 )
-            )
     else:
         st.caption(t("dashboard.no_notifications", language))
 
@@ -274,11 +292,11 @@ def _render_reminder_panel(
         for column in ["title", "reminder_type", "due_at", "status", "source", "course_name"]
         if column in reminder_df.columns
     ]
-    st.dataframe(reminder_df[visible_columns], use_container_width=True, hide_index=True)
+    st.dataframe(reminder_df[visible_columns], use_container_width=True, hide_index=True, height=300)
 
     for reminder in pending_reminders[:5]:
         label = f"{reminder.get('title', '')} ({reminder.get('due_at', '')})"
-        done_col, title_col = st.columns([1, 4])
+        done_col, title_col = st.columns([1, 4], gap="small", vertical_alignment="center")
         with title_col:
             st.caption(label)
         with done_col:
@@ -310,8 +328,8 @@ def _render_quiz_trend(quiz_attempts: list[dict[str, Any]], language: str) -> No
     st.markdown(f"### {t('dashboard.quiz_trend', language)}")
     if quiz_attempts:
         quiz_df = pd.DataFrame(quiz_attempts)
-        st.line_chart(quiz_df["score_percent"], use_container_width=True)
-        st.dataframe(quiz_df, use_container_width=True, hide_index=True)
+        st.line_chart(quiz_df["score_percent"], use_container_width=True, height=260)
+        st.dataframe(quiz_df, use_container_width=True, hide_index=True, height=300)
     else:
         st.info(t("dashboard.no_quizzes", language))
 
@@ -322,10 +340,11 @@ def _render_plan_overview(current_context: dict[str, Any], language: str) -> Non
     if active_plan:
         plan_df = pd.DataFrame(active_plan["tasks"])
         topic_hours = plan_df.groupby("topic", as_index=False)["hours"].sum()
-        st.bar_chart(topic_hours.set_index("topic"), use_container_width=True)
+        st.bar_chart(topic_hours.set_index("topic"), use_container_width=True, height=260)
         st.dataframe(
             topic_hours.sort_values(by="hours", ascending=False),
             use_container_width=True,
+            height=260,
             hide_index=True,
             column_config={
                 "topic": st.column_config.TextColumn(t("dashboard.col.topic", language), width="large"),
@@ -369,12 +388,12 @@ def _render_memory_snapshot(
         st.markdown(f"#### {t('dashboard.weak_topics', language)}")
         weak_topics = snapshot.get("weak_topics", [])
         if weak_topics:
-            st.dataframe(pd.DataFrame(weak_topics), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(weak_topics), hide_index=True, use_container_width=True, height=260)
         else:
             st.info(t("dashboard.no_weak_topics", language))
         if snapshot.get("reminders"):
             st.markdown(f"#### {t('dashboard.reminders', language)}")
-            st.dataframe(pd.DataFrame(snapshot["reminders"]), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(snapshot["reminders"]), hide_index=True, use_container_width=True, height=260)
 
 
 def _sync_reminders(

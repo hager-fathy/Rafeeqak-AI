@@ -72,7 +72,7 @@ def render_quiz_page(project_root: Path) -> None:
         st.info(course_warning)
 
     active_quiz_for_render: dict[str, Any] | None = None
-    setup_col, history_col = st.columns([1.6, 1], gap="large")
+    setup_col, history_col = st.columns([1.6, 1], gap="large", vertical_alignment="top")
 
     with setup_col:
         with st.container(border=True):
@@ -86,12 +86,23 @@ def render_quiz_page(project_root: Path) -> None:
                     disabled=active_course is None or not source_options,
                     placeholder=t("quiz.source_file_placeholder", language),
                 )
-                difficulty = st.selectbox(
-                    t("quiz.difficulty", language),
-                    options=["easy", "medium", "hard"],
-                    index=["easy", "medium", "hard"].index(user_settings["default_quiz_difficulty"]),
-                    format_func=lambda value: t(f"quiz.difficulty.{value}", language),
-                )
+                difficulty_col, count_col = st.columns(2, gap="small", vertical_alignment="bottom")
+                with difficulty_col:
+                    difficulty = st.selectbox(
+                        t("quiz.difficulty", language),
+                        options=["easy", "medium", "hard"],
+                        index=["easy", "medium", "hard"].index(user_settings["default_quiz_difficulty"]),
+                        format_func=lambda value: t(f"quiz.difficulty.{value}", language),
+                    )
+                with count_col:
+                    question_count = st.number_input(
+                        t("quiz.count", language),
+                        min_value=1,
+                        max_value=20,
+                        value=4,
+                        step=1,
+                        format="%d",
+                    )
                 question_type_labels = {
                     "mcq": t("quiz.type.mcq", language),
                     "true_false": t("quiz.type.true_false", language),
@@ -103,14 +114,6 @@ def render_quiz_page(project_root: Path) -> None:
                     options=list(question_type_labels.keys()),
                     default=user_settings["default_question_types"],
                     format_func=lambda value: question_type_labels[value],
-                )
-                question_count = st.number_input(
-                    t("quiz.count", language),
-                    min_value=1,
-                    max_value=20,
-                    value=4,
-                    step=1,
-                    format="%d",
                 )
                 create_quiz = st.form_submit_button(
                     t("quiz.create", language),
@@ -243,7 +246,7 @@ def render_quiz_page(project_root: Path) -> None:
         else t("quiz.caption.templates", language)
     )
 
-    with st.container(border=True):
+    with st.container(height=560, border=True, key="quiz_questions_panel"):
         st.markdown(f"#### {t('quiz.answer_title', language)}")
         with st.form("quiz_answers_form"):
             answers = []
@@ -393,17 +396,18 @@ def _render_feedback(evaluation: dict[str, Any] | None, language: str) -> None:
 
     question_prefix = "س" if language == "ar" else "Q"
     with st.expander(t("quiz.feedback", language), expanded=True):
-        for index, item in enumerate(evaluation["feedback"], start=1):
-            status = t("quiz.correct", language) if item["is_correct"] else t("quiz.needs_review", language)
-            st.markdown(f"**{question_prefix}{index}. {status}**")
-            st.write(item["question"])
-            if item.get("partial_credit"):
-                st.caption(t("quiz.partial", language, score=item["score"]))
-            st.caption(t("quiz.your_answer", language, answer=item["selected_answer"] or t("quiz.no_answer", language)))
-            if not item["is_correct"]:
-                st.caption(t("quiz.correct_answer", language, answer=item["correct_answer"]))
-            if item["explanation"]:
-                st.info(item["explanation"])
+        with st.container(height=420, border=False, key="quiz_feedback_panel"):
+            for index, item in enumerate(evaluation["feedback"], start=1):
+                status = t("quiz.correct", language) if item["is_correct"] else t("quiz.needs_review", language)
+                st.markdown(f"**{question_prefix}{index}. {status}**")
+                st.write(item["question"])
+                if item.get("partial_credit"):
+                    st.caption(t("quiz.partial", language, score=item["score"]))
+                st.caption(t("quiz.your_answer", language, answer=item["selected_answer"] or t("quiz.no_answer", language)))
+                if not item["is_correct"]:
+                    st.caption(t("quiz.correct_answer", language, answer=item["correct_answer"]))
+                if item["explanation"]:
+                    st.info(item["explanation"])
 
 
 def _render_question_input(index: int, item: dict[str, Any], language: str) -> Any:
@@ -441,16 +445,17 @@ def _render_flashcards(flashcards: list[dict[str, str]], language: str) -> None:
         return
 
     with st.expander(t("quiz.flashcards", language), expanded=False):
-        for card in flashcards:
-            st.markdown(f"**{card['front']}**")
-            st.write(card["back"])
+        with st.container(height=320, border=False, key="quiz_flashcards_panel"):
+            for card in flashcards:
+                st.markdown(f"**{card['front']}**")
+                st.write(card["back"])
 
 
 def _render_attempt_history(attempts: list[dict[str, Any]], language: str) -> None:
     if attempts:
         st.markdown(f"### {t('quiz.history', language)}")
         history_df = pd.DataFrame(attempts)
-        st.dataframe(history_df, use_container_width=True, hide_index=True)
+        st.dataframe(history_df, use_container_width=True, hide_index=True, height=320)
 
 
 def _active_quiz(*, fallback: dict[str, Any] | None = None) -> dict[str, Any] | None:

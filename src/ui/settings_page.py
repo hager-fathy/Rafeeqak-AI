@@ -45,7 +45,7 @@ def render_settings_page(project_root: Path) -> None:
         language=language,
     )
 
-    profile_col, defaults_col = st.columns([1, 1.4], gap="large")
+    profile_col, defaults_col = st.columns([1, 1.4], gap="large", vertical_alignment="top")
     with profile_col:
         with st.container(border=True):
             st.markdown(f"#### {t('settings.profile', language)}")
@@ -64,7 +64,7 @@ def render_settings_page(project_root: Path) -> None:
             )
 
     with defaults_col:
-        study_col, quiz_col = st.columns(2, gap="large")
+        study_col, quiz_col = st.columns(2, gap="large", vertical_alignment="top")
         with study_col:
             with st.container(border=True):
                 st.markdown(f"#### {t('settings.study_defaults', language)}")
@@ -100,7 +100,7 @@ def render_settings_page(project_root: Path) -> None:
     reminder_preferences = settings["reminder_preferences"]
     with st.container(border=True):
         st.markdown(f"#### {t('settings.reminder_defaults', language)}")
-        enabled_col, time_col, types_col = st.columns([1, 1, 2], gap="large")
+        enabled_col, time_col, types_col = st.columns([1, 1, 2], gap="large", vertical_alignment="bottom")
         with enabled_col:
             reminders_enabled = st.toggle(
                 t("settings.reminders_enabled", language),

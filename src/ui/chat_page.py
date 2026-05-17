@@ -19,6 +19,10 @@ from src.tools.state import (
 from src.ui.theme import render_page_hero
 
 
+def _send_button_label(language: str) -> str:
+    return "<" if language == "ar" else ">"
+
+
 def _assistant_reply(user_message: str) -> str:
     context = course_context()
     context["auth_user"] = get_authenticated_user()
@@ -101,10 +105,10 @@ def render_chat_page(project_root: Path) -> None:
     if course_warning:
         st.info(course_warning)
 
-    chat_col, insights_col = st.columns([2.2, 1], gap="large")
+    chat_col, insights_col = st.columns([2.2, 1], gap="large", vertical_alignment="top")
 
     with chat_col:
-        conversation = st.container(border=True)
+        conversation = st.container(height=420, border=True, key="chat_history_panel")
         with conversation:
             if not chat_history:
                 st.info(t("chat.empty", language))
@@ -112,6 +116,31 @@ def render_chat_page(project_root: Path) -> None:
                 for item in chat_history:
                     with st.chat_message(item["role"]):
                         st.markdown(item["content"])
+
+        with st.form(key="chat_form", clear_on_submit=True):
+            input_col, send_col = st.columns([6, 1], gap="small", vertical_alignment="bottom")
+            with input_col:
+                user_text = st.text_input(
+                    t("chat.input", language),
+                    placeholder=t("chat.input", language),
+                    label_visibility="collapsed",
+                    disabled=active_course is None,
+                )
+            with send_col:
+                submitted = st.form_submit_button(
+                    _send_button_label(language),
+                    use_container_width=True,
+                    disabled=active_course is None,
+                )
+
+        if submitted and user_text.strip():
+            chat_history.append({"role": "user", "content": user_text.strip()})
+            reply = _assistant_reply(user_text.strip())
+            chat_history.append({"role": "assistant", "content": reply})
+            _record_session_summary(chat_history)
+            update_active_course_bucket(chat_history=chat_history)
+            touch_activity()
+            st.rerun()
 
     with insights_col:
         st.markdown(f"#### {t('chat.quick_prompts', language)}")
@@ -145,23 +174,14 @@ def render_chat_page(project_root: Path) -> None:
         chat_summaries = current_context.get("chat_summaries", [])
         if chat_summaries:
             latest_summary = chat_summaries[-1]
-            st.markdown(f"#### {t('chat.latest_summary', language)}")
-            st.write(latest_summary.get("summary", ""))
-            if latest_summary.get("next_steps"):
-                st.caption(t("chat.next_steps", language))
-                for step in latest_summary["next_steps"][:3]:
-                    st.caption(f"- {step}")
+            with st.container(height=220, border=True, key="chat_summary_panel"):
+                st.markdown(f"#### {t('chat.latest_summary', language)}")
+                st.write(latest_summary.get("summary", ""))
+                if latest_summary.get("next_steps"):
+                    st.caption(t("chat.next_steps", language))
+                    for step in latest_summary["next_steps"][:3]:
+                        st.caption(f"- {step}")
         if st.button(t("chat.clear", language), use_container_width=True):
             update_active_course_bucket(chat_history=[], chat_summaries=[])
             touch_activity()
             st.rerun()
-
-    user_text = st.chat_input(t("chat.input", language), disabled=active_course is None)
-    if user_text:
-        chat_history.append({"role": "user", "content": user_text})
-        reply = _assistant_reply(user_text)
-        chat_history.append({"role": "assistant", "content": reply})
-        _record_session_summary(chat_history)
-        update_active_course_bucket(chat_history=chat_history)
-        touch_activity()
-        st.rerun()

@@ -136,59 +136,74 @@ def render_study_plan_page(project_root: Path) -> None:
         language=language,
     )
 
-    input_col, summary_col = st.columns([1.8, 1], gap="large")
+    input_col, summary_col = st.columns([1.8, 1], gap="large", vertical_alignment="top")
 
     with input_col:
         with st.container(border=True):
             st.markdown(f"#### {t('planner.config', language)}")
             with st.form("plan_form"):
-                course_name = st.text_input(
-                    t("planner.course_name", language),
-                    value=active_course["name"] if active_course else "",
-                    placeholder=t("planner.course_placeholder", language),
-                )
-                exam_date = st.date_input(
-                    t("planner.exam_date", language),
-                    value=default_exam_date,
-                    min_value=date.today(),
-                )
-                difficulty = st.selectbox(
-                    t("planner.difficulty", language),
-                    options=["easy", "medium", "hard"],
-                    index=["easy", "medium", "hard"].index(default_difficulty),
-                    format_func=lambda value: t(f"quiz.difficulty.{value}", language),
-                )
-                lecture_count = st.number_input(
-                    t("planner.lecture_count", language),
-                    min_value=1,
-                    max_value=60,
-                    value=max(default_lecture_count, 1),
-                    step=1,
-                )
-                finish_period_days = st.number_input(
-                    t("planner.finish_period", language),
-                    min_value=1,
-                    max_value=max(default_window_days, 1),
-                    value=min(max(default_finish_period, 1), max(default_window_days, 1)),
-                    step=1,
-                )
-                daily_hours = st.number_input(
-                    t("planner.daily_hours", language),
-                    min_value=0.5,
-                    max_value=12.0,
-                    value=float((active_plan or {}).get("daily_hours") or user_settings["daily_study_hours"]),
-                    step=0.5,
-                )
-                weak_topics_input = st.text_input(
-                    t("planner.weak_topics", language),
-                    value=_topic_text((active_plan or {}).get("weak_topics") or derived_weak_topics),
-                    placeholder=t("planner.weak_placeholder", language),
-                )
-                other_topics_input = st.text_input(
-                    t("planner.other_topics", language),
-                    value=_topic_text((active_plan or {}).get("other_topics") or []),
-                    placeholder=t("planner.other_placeholder", language),
-                )
+                course_name_col, exam_date_col = st.columns(2, gap="small", vertical_alignment="bottom")
+                with course_name_col:
+                    course_name = st.text_input(
+                        t("planner.course_name", language),
+                        value=active_course["name"] if active_course else "",
+                        placeholder=t("planner.course_placeholder", language),
+                    )
+                with exam_date_col:
+                    exam_date = st.date_input(
+                        t("planner.exam_date", language),
+                        value=default_exam_date,
+                        min_value=date.today(),
+                    )
+
+                difficulty_col, lecture_col = st.columns(2, gap="small", vertical_alignment="bottom")
+                with difficulty_col:
+                    difficulty = st.selectbox(
+                        t("planner.difficulty", language),
+                        options=["easy", "medium", "hard"],
+                        index=["easy", "medium", "hard"].index(default_difficulty),
+                        format_func=lambda value: t(f"quiz.difficulty.{value}", language),
+                    )
+                with lecture_col:
+                    lecture_count = st.number_input(
+                        t("planner.lecture_count", language),
+                        min_value=1,
+                        max_value=60,
+                        value=max(default_lecture_count, 1),
+                        step=1,
+                    )
+
+                finish_col, daily_col = st.columns(2, gap="small", vertical_alignment="bottom")
+                with finish_col:
+                    finish_period_days = st.number_input(
+                        t("planner.finish_period", language),
+                        min_value=1,
+                        max_value=max(default_window_days, 1),
+                        value=min(max(default_finish_period, 1), max(default_window_days, 1)),
+                        step=1,
+                    )
+                with daily_col:
+                    daily_hours = st.number_input(
+                        t("planner.daily_hours", language),
+                        min_value=0.5,
+                        max_value=12.0,
+                        value=float((active_plan or {}).get("daily_hours") or user_settings["daily_study_hours"]),
+                        step=0.5,
+                    )
+
+                weak_col, other_col = st.columns(2, gap="small", vertical_alignment="bottom")
+                with weak_col:
+                    weak_topics_input = st.text_input(
+                        t("planner.weak_topics", language),
+                        value=_topic_text((active_plan or {}).get("weak_topics") or derived_weak_topics),
+                        placeholder=t("planner.weak_placeholder", language),
+                    )
+                with other_col:
+                    other_topics_input = st.text_input(
+                        t("planner.other_topics", language),
+                        value=_topic_text((active_plan or {}).get("other_topics") or []),
+                        placeholder=t("planner.other_placeholder", language),
+                    )
                 submit_plan = st.form_submit_button(t("planner.generate", language), use_container_width=True)
 
     with summary_col:
@@ -224,8 +239,9 @@ def render_study_plan_page(project_root: Path) -> None:
                 recovery_recommendations = active_plan.get("recovery_recommendations", [])
                 if recovery_recommendations:
                     st.markdown(f"##### {t('planner.recovery_title', language)}")
-                    for item in recovery_recommendations:
-                        st.caption(f"- {item}")
+                    with st.container(height=180, border=True, key="planner_recovery_panel"):
+                        for item in recovery_recommendations:
+                            st.caption(f"- {item}")
             else:
                 st.info(t("planner.no_insights", language))
             st.metric(
@@ -308,6 +324,7 @@ def render_study_plan_page(project_root: Path) -> None:
     edited_df = st.data_editor(
         tasks_df,
         use_container_width=True,
+        height=420,
         hide_index=True,
         disabled=[column for column in tasks_df.columns if column != "mark_as_done"],
         key=f"plan_timeline_editor_{course_scope}_{active_plan.get('exam_date', 'date')}",
@@ -315,17 +332,19 @@ def render_study_plan_page(project_root: Path) -> None:
             "task_id": None,
             "date": st.column_config.TextColumn(t("planner.col.study_date", language), width="small"),
             "topic": st.column_config.TextColumn(t("planner.col.topic", language), width="medium"),
-            "phase": st.column_config.TextColumn(t("planner.col.phase", language), width="medium"),
-            "task": st.column_config.TextColumn(t("planner.col.task", language), width="large"),
-            "hours": st.column_config.NumberColumn(t("planner.col.hours", language), format="%.1f h"),
+            "phase": st.column_config.TextColumn(t("planner.col.phase", language), width="small"),
+            "task": st.column_config.TextColumn(t("planner.col.task", language), width="medium"),
+            "hours": st.column_config.NumberColumn(t("planner.col.hours", language), format="%.1f h", width="small"),
             "quiz_required_label": st.column_config.TextColumn(
                 t("planner.col.quiz_required", language),
                 help=t("planner.col.quiz_required_help", language),
+                width="small",
             ),
-            "mark_as_done": st.column_config.CheckboxColumn(t("planner.col.mark_as_done", language)),
+            "mark_as_done": st.column_config.CheckboxColumn(t("planner.col.mark_as_done", language), width="small"),
             "completion_note": st.column_config.TextColumn(
                 t("planner.col.completion_note", language),
                 help=t("planner.col.completion_note_help", language),
+                width="small",
             ),
         },
     )

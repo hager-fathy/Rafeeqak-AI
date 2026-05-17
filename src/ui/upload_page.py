@@ -50,7 +50,7 @@ def render_upload_page(project_root: Path) -> None:
     if course_warning:
         st.info(course_warning)
 
-    upload_col, library_col = st.columns([1.4, 1], gap="large")
+    upload_col, library_col = st.columns([1.4, 1], gap="large", vertical_alignment="top")
 
     with upload_col:
         with st.container(border=True):
@@ -123,39 +123,41 @@ def render_upload_page(project_root: Path) -> None:
     st.dataframe(
         pd.DataFrame(table_rows),
         use_container_width=True,
+        height=320,
         hide_index=True,
         column_config={
-            "file_name": st.column_config.TextColumn(t("upload.col.file_name", language), width="large"),
-            "size_kb": st.column_config.NumberColumn(t("upload.col.size", language), format="%.2f"),
+            "file_name": st.column_config.TextColumn(t("upload.col.file_name", language), width="medium"),
+            "size_kb": st.column_config.NumberColumn(t("upload.col.size", language), format="%.2f", width="small"),
             "last_modified_utc": st.column_config.TextColumn(t("upload.col.updated", language), width="medium"),
         },
     )
 
     st.markdown(f"#### {t('upload.manage', language)}")
-    for file_path in stored_files:
-        stat = file_path.stat()
-        file_col, size_col, action_col = st.columns([3, 1, 1], gap="small")
-        with file_col:
-            st.write(file_path.name)
-        with size_col:
-            st.caption(f"{round(stat.st_size / 1024, 2)} KB")
-        with action_col:
-            if st.button(t("common.delete", language), key=f"delete_upload_{file_path.name}", use_container_width=True):
-                result = indexer.remove_file(file_path, course_id=course_id)
-                if result["ok"]:
-                    uploads = [
-                        item
-                        for item in course_context().get("uploads", [])
-                        if item.get("stored_name") != file_path.name
-                    ]
-                    update_active_course_bucket(uploads=uploads)
-                    touch_activity()
-                    st.success(
-                        t("upload.deleted", language, file_name=file_path.name, chunks=result["removed_chunks"])
-                    )
-                    st.rerun()
-                else:
-                    st.warning(t("upload.delete_failed", language, file_name=file_path.name, reason=result["reason"]))
+    with st.container(height=360, border=True, key="upload_file_manager"):
+        for file_path in stored_files:
+            stat = file_path.stat()
+            file_col, size_col, action_col = st.columns([3, 1, 1], gap="small", vertical_alignment="center")
+            with file_col:
+                st.write(file_path.name)
+            with size_col:
+                st.caption(f"{round(stat.st_size / 1024, 2)} KB")
+            with action_col:
+                if st.button(t("common.delete", language), key=f"delete_upload_{file_path.name}", use_container_width=True):
+                    result = indexer.remove_file(file_path, course_id=course_id)
+                    if result["ok"]:
+                        uploads = [
+                            item
+                            for item in course_context().get("uploads", [])
+                            if item.get("stored_name") != file_path.name
+                        ]
+                        update_active_course_bucket(uploads=uploads)
+                        touch_activity()
+                        st.success(
+                            t("upload.deleted", language, file_name=file_path.name, chunks=result["removed_chunks"])
+                        )
+                        st.rerun()
+                    else:
+                        st.warning(t("upload.delete_failed", language, file_name=file_path.name, reason=result["reason"]))
 
 
 def _stored_material_files(uploads_dir: Path) -> list[Path]:

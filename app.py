@@ -87,7 +87,6 @@ def main() -> None:
         _load_language_from_profile_once(memory_agent, user)
     language = get_selected_language()
     inject_global_styles(language)
-    _render_gemini_config_warning(gemini_settings, language)
 
     if user:
         pages = {
@@ -146,88 +145,96 @@ def main() -> None:
     if st.session_state.selected_page not in pages:
         st.session_state.selected_page = list(pages.keys())[0]
 
-    nav_col_left, nav_col_center, nav_col_right = st.columns([1, 2.8, 1], gap="small")
-    with nav_col_left:
-        st.markdown(f"<div class='top-nav-title'>{t('nav.language', language)}</div>", unsafe_allow_html=True)
-        selected_language = st.segmented_control(
-            t("nav.language_picker", language),
-            options=list(SUPPORTED_LANGUAGES),
-            default=language,
-            format_func=lambda option: LANGUAGE_LABELS[option],
-            selection_mode="single",
-            label_visibility="collapsed",
-            key="language_selector",
-        )
-        if selected_language and selected_language != get_selected_language():
-            set_selected_language(selected_language)
-            st.session_state["language_sync_notice"] = _save_language_preference(
-                memory_agent=memory_agent,
-                user=user,
-                language=selected_language,
-            )
-            st.rerun()
-        sync_notice = st.session_state.pop("language_sync_notice", None)
-        if sync_notice:
-            st.caption(sync_notice)
+    with st.container(key="main_app_container"):
+        st.markdown("<div class='main-app-container'></div>", unsafe_allow_html=True)
+        _render_gemini_config_warning(gemini_settings, language)
 
-    with nav_col_center:
-        st.markdown(f"<div class='top-nav-title'>{t('nav.title', language)}</div>", unsafe_allow_html=True)
-        selected_page = st.segmented_control(
-            t("nav.go_to", language),
-            options=list(pages.keys()),
-            default=st.session_state.selected_page,
-            format_func=lambda option: pages[option]["label"],
-            selection_mode="single",
-            label_visibility="collapsed",
-            key="top_nav_selector",
-        )
-        if selected_page is None:
-            selected_page = st.session_state.selected_page
-        st.session_state.selected_page = selected_page
-
-    if user:
-        courses = get_courses()
-        active_course = get_active_course()
-        course_ids = [course["id"] for course in courses]
-        course_col, new_course_col = st.columns([1.5, 1], gap="small")
-        with course_col:
-            st.markdown(f"<div class='top-nav-title'>{t('nav.active_course', language)}</div>", unsafe_allow_html=True)
-            selected_course_id = st.selectbox(
-                t("nav.active_course_label", language),
-                options=course_ids,
-                index=(
-                    course_ids.index(active_course["id"])
-                    if active_course and active_course["id"] in course_ids
-                    else None
-                ),
-                format_func=lambda course_id: next(
-                    (course["name"] for course in courses if course["id"] == course_id),
-                    t("course.none_selected", language),
-                ),
-                placeholder=t("nav.select_course_placeholder", language),
+        nav_col_left, nav_col_center = st.columns([1, 2.4], gap="small", vertical_alignment="bottom")
+        with nav_col_left:
+            st.markdown(f"<div class='top-nav-title'>{t('nav.language', language)}</div>", unsafe_allow_html=True)
+            selected_language = st.segmented_control(
+                t("nav.language_picker", language),
+                options=list(SUPPORTED_LANGUAGES),
+                default=language,
+                format_func=lambda option: LANGUAGE_LABELS[option],
+                selection_mode="single",
                 label_visibility="collapsed",
+                key="language_selector",
             )
-            if selected_course_id and selected_course_id != st.session_state.get("active_course_id"):
-                set_active_course(selected_course_id)
+            if selected_language and selected_language != get_selected_language():
+                set_selected_language(selected_language)
+                st.session_state["language_sync_notice"] = _save_language_preference(
+                    memory_agent=memory_agent,
+                    user=user,
+                    language=selected_language,
+                )
                 st.rerun()
-        with new_course_col:
-            with st.form("quick_course_form", border=False):
-                course_name = st.text_input(
-                    t("nav.new_course", language),
-                    placeholder=t("nav.new_course_placeholder", language),
+            sync_notice = st.session_state.pop("language_sync_notice", None)
+            if sync_notice:
+                st.caption(sync_notice)
+
+        with nav_col_center:
+            st.markdown(f"<div class='top-nav-title'>{t('nav.title', language)}</div>", unsafe_allow_html=True)
+            selected_page = st.segmented_control(
+                t("nav.go_to", language),
+                options=list(pages.keys()),
+                default=st.session_state.selected_page,
+                format_func=lambda option: pages[option]["label"],
+                selection_mode="single",
+                label_visibility="collapsed",
+                key="top_nav_selector",
+            )
+            if selected_page is None:
+                selected_page = st.session_state.selected_page
+            st.session_state.selected_page = selected_page
+
+        if user:
+            courses = get_courses()
+            active_course = get_active_course()
+            course_ids = [course["id"] for course in courses]
+            course_col, new_course_col = st.columns([1.35, 1], gap="small", vertical_alignment="bottom")
+            with course_col:
+                st.markdown(f"<div class='top-nav-title'>{t('nav.active_course', language)}</div>", unsafe_allow_html=True)
+                selected_course_id = st.selectbox(
+                    t("nav.active_course_label", language),
+                    options=course_ids,
+                    index=(
+                        course_ids.index(active_course["id"])
+                        if active_course and active_course["id"] in course_ids
+                        else None
+                    ),
+                    format_func=lambda course_id: next(
+                        (course["name"] for course in courses if course["id"] == course_id),
+                        t("course.none_selected", language),
+                    ),
+                    placeholder=t("nav.select_course_placeholder", language),
                     label_visibility="collapsed",
                 )
-                submitted = st.form_submit_button(t("nav.add_course", language), use_container_width=True)
-                if submitted:
-                    course = add_course(course_name)
-                    if course is None:
-                        st.warning(t("nav.enter_course_name", language))
-                    else:
-                        st.success(t("nav.active_course_success", language, course_name=course["name"]))
-                        st.rerun()
-        _render_course_management(courses, active_course, language)
-        _render_reminder_notifications(language)
-    pages[selected_page]["handler"](project_root=PROJECT_ROOT)
+                if selected_course_id and selected_course_id != st.session_state.get("active_course_id"):
+                    set_active_course(selected_course_id)
+                    st.rerun()
+            with new_course_col:
+                st.markdown(f"<div class='top-nav-title'>{t('nav.new_course', language)}</div>", unsafe_allow_html=True)
+                with st.form("quick_course_form", border=False):
+                    quick_name_col, quick_button_col = st.columns([1.55, 1], gap="small", vertical_alignment="bottom")
+                    with quick_name_col:
+                        course_name = st.text_input(
+                            t("nav.new_course", language),
+                            placeholder=t("nav.new_course_placeholder", language),
+                            label_visibility="collapsed",
+                        )
+                    with quick_button_col:
+                        submitted = st.form_submit_button(t("nav.add_course", language), use_container_width=True)
+                    if submitted:
+                        course = add_course(course_name)
+                        if course is None:
+                            st.warning(t("nav.enter_course_name", language))
+                        else:
+                            st.success(t("nav.active_course_success", language, course_name=course["name"]))
+                            st.rerun()
+            _render_course_management(courses, active_course, language)
+            _render_reminder_notifications(language)
+        pages[selected_page]["handler"](project_root=PROJECT_ROOT)
 
 
 def _render_course_management(courses: list[dict], active_course: dict | None, language: str) -> None:
@@ -254,7 +261,7 @@ def _render_course_management(courses: list[dict], active_course: dict | None, l
             st.warning(t("nav.course_missing", language))
             return
 
-        rename_col, delete_col = st.columns([1.4, 1], gap="large")
+        rename_col, delete_col = st.columns([1.4, 1], gap="large", vertical_alignment="top")
         with rename_col:
             with st.form(f"rename_course_{selected_id}", border=False):
                 new_name = st.text_input(
@@ -335,20 +342,27 @@ def _render_reminder_notifications(language: str) -> None:
         return
 
     with st.expander(t("dashboard.notifications", language), expanded=True):
-        for due_at, reminder in sorted(notifications, key=lambda item: item[0])[:5]:
-            message = t(
-                "dashboard.notification_due",
-                language,
-                course=reminder.get("course_name")
-                or context.get("active_course_name")
-                or t("course.none_selected", language),
-                title=reminder.get("title", ""),
-                due_at=due_at.strftime("%Y-%m-%d %H:%M"),
-            )
-            if due_at <= now:
-                st.warning(message)
-            else:
-                st.info(message)
+        visible_notifications = sorted(notifications, key=lambda item: item[0])[:5]
+        alert_panel = (
+            st.container(height=180, border=False, key="reminder_notifications_panel")
+            if len(visible_notifications) > 2
+            else st.container()
+        )
+        with alert_panel:
+            for due_at, reminder in visible_notifications:
+                message = t(
+                    "dashboard.notification_due",
+                    language,
+                    course=reminder.get("course_name")
+                    or context.get("active_course_name")
+                    or t("course.none_selected", language),
+                    title=reminder.get("title", ""),
+                    due_at=due_at.strftime("%Y-%m-%d %H:%M"),
+                )
+                if due_at <= now:
+                    st.warning(message)
+                else:
+                    st.info(message)
 
 
 def _parse_reminder_datetime(value: object) -> datetime | None:

@@ -25,7 +25,7 @@ def render_login_page(project_root: Path) -> None:
         st.error(t("auth.not_configured", language, reason=auth_service.unavailability_reason))
         return
 
-    center_col, form_col, right_col = st.columns([1, 1.4, 1], gap="small")
+    center_col, form_col, right_col = st.columns([1, 1.4, 1], gap="small", vertical_alignment="center")
     with form_col:
         with st.container(border=True):
             st.markdown(f"#### {t('login.form_title', language)}")

@@ -156,6 +156,9 @@ def init_state() -> None:
 
     _migrate_legacy_course_state()
     sync_active_course_aliases()
+    if "lang" not in st.session_state:
+        st.session_state["lang"] = normalize_language(st.session_state.get("selected_language"))
+    st.session_state["_last_synced_lang"] = normalize_language(st.session_state.get("selected_language"))
 
 
 def touch_activity() -> None:
@@ -292,8 +295,16 @@ def require_active_course_message() -> str | None:
 
 
 def get_selected_language() -> str:
-    language = normalize_language(st.session_state.get("selected_language"))
+    selected_language = normalize_language(st.session_state.get("selected_language"))
+    alias_language = st.session_state.get("lang")
+    last_synced = st.session_state.get("_last_synced_lang")
+    if alias_language and normalize_language(alias_language) != normalize_language(last_synced):
+        language = normalize_language(alias_language)
+    else:
+        language = selected_language
     st.session_state["selected_language"] = language
+    st.session_state["lang"] = language
+    st.session_state["_last_synced_lang"] = language
     return language
 
 
@@ -301,6 +312,8 @@ def set_selected_language(language: str | None) -> bool:
     normalized = normalize_language(language)
     changed = normalized != st.session_state.get("selected_language")
     st.session_state["selected_language"] = normalized
+    st.session_state["lang"] = normalized
+    st.session_state["_last_synced_lang"] = normalized
     user_settings = get_user_settings()
     if user_settings.get("preferred_language") != normalized:
         user_settings["preferred_language"] = normalized
@@ -383,6 +396,8 @@ def update_user_settings(settings: dict | None = None, **values: object) -> dict
     normalized = _normalize_user_settings(merged)
     st.session_state["user_settings"] = normalized
     st.session_state["selected_language"] = normalized["preferred_language"]
+    st.session_state["lang"] = normalized["preferred_language"]
+    st.session_state["_last_synced_lang"] = normalized["preferred_language"]
     touch_activity()
     _save_user_workspace()
     return normalized
@@ -699,6 +714,8 @@ def _apply_workspace_state(workspace: dict) -> None:
         st.session_state["selected_language"] = normalize_language(
             workspace.get("selected_language") or st.session_state["user_settings"].get("preferred_language")
         )
+        st.session_state["lang"] = st.session_state["selected_language"]
+        st.session_state["_last_synced_lang"] = st.session_state["selected_language"]
         st.session_state["user_settings"]["preferred_language"] = st.session_state["selected_language"]
 
         if get_active_course() is None:
@@ -718,6 +735,8 @@ def _reset_workspace_state() -> None:
         st.session_state["active_course_name"] = None
         st.session_state["course_data"] = {}
         st.session_state["selected_language"] = "en"
+        st.session_state["lang"] = "en"
+        st.session_state["_last_synced_lang"] = "en"
         st.session_state["user_settings"] = _default_user_settings()
         for key, value in _empty_course_bucket().items():
             st.session_state[key] = value
