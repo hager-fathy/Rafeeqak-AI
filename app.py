@@ -1,4 +1,12 @@
+import asyncio
+import sys
+import warnings
 from datetime import datetime, timedelta
+
+if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import streamlit as st
 
@@ -10,7 +18,8 @@ from src.auth import AuthService
 from src.auth.session_persistence import bootstrap_authentication
 from src.localization import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, t
 from src.retrieval import CourseMaterialIndexer
-from src.tools.llm_client import LLMSettings, get_llm_settings, log_gemini_key_status
+from src.tools import llm_client as llm_client_module
+from src.tools.llm_client import LLMSettings, get_llm_settings
 from src.tools.state import (
     add_course,
     course_context,
@@ -55,7 +64,9 @@ def _initialize_gemini_config() -> LLMSettings:
     }
     debug_status = (settings.is_configured, settings.model)
     if st.session_state.get("_gemini_debug_status") != debug_status:
-        log_gemini_key_status(settings)
+        logger_fn = getattr(llm_client_module, "log_gemini_key_status", None)
+        if callable(logger_fn):
+            logger_fn(settings)
         st.session_state["_gemini_debug_status"] = debug_status
     return settings
 

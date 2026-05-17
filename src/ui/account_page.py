@@ -36,7 +36,12 @@ def render_account_page(project_root: Path) -> None:
         st.write(t("account.signed_in_as", language, email=email))
 
         if st.button(t("account.logout", language), type="primary", use_container_width=True):
-            result = AuthService().sign_out()
+            auth_service = AuthService()
+            provider = (user.get("app_metadata") or {}).get("provider") or (user.get("user_metadata") or {}).get("auth_provider")
+            if provider == "local_demo" or not auth_service.is_available:
+                result = {"ok": True, "message": t("account.logged_out", language)}
+            else:
+                result = auth_service.sign_out()
             clear_authenticated_user()
             if result["ok"]:
                 st.success(t("account.logged_out", language))

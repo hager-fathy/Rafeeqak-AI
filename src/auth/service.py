@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 try:
@@ -143,3 +144,20 @@ class AuthService:
             return {"ok": False, "message": str(exc)}
         except Exception as exc:  # pragma: no cover - external client behavior
             return {"ok": False, "message": f"Logout failed: {exc}"}
+
+
+def build_local_demo_user(*, email: str, full_name: str) -> dict[str, Any]:
+    normalized_email = (email or "demo@example.com").strip().casefold() or "demo@example.com"
+    resolved_name = full_name.strip() if full_name.strip() else "Demo Student"
+    local_id = hashlib.sha1(normalized_email.encode("utf-8")).hexdigest()[:12]
+    return {
+        "id": f"local-{local_id}",
+        "email": normalized_email,
+        "user_metadata": {
+            "full_name": resolved_name,
+            "auth_provider": "local_demo",
+        },
+        "app_metadata": {
+            "provider": "local_demo",
+        },
+    }

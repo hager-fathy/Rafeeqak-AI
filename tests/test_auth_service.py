@@ -1,4 +1,5 @@
 from src.auth import AuthService
+from src.auth.service import build_local_demo_user
 from src.memory import supabase_client
 
 
@@ -32,3 +33,12 @@ def test_supabase_client_ignores_broken_env_proxy_by_default(monkeypatch) -> Non
     assert captured["options"].httpx_client._trust_env is False
 
     supabase_client.get_supabase_client.cache_clear()
+
+
+def test_build_local_demo_user_normalizes_identity() -> None:
+    user = build_local_demo_user(email=" Demo@Example.com ", full_name="Demo Student")
+
+    assert user["email"] == "demo@example.com"
+    assert user["user_metadata"]["full_name"] == "Demo Student"
+    assert user["user_metadata"]["auth_provider"] == "local_demo"
+    assert user["app_metadata"]["provider"] == "local_demo"
