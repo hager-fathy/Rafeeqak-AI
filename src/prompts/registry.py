@@ -10,6 +10,14 @@ TEMPLATE_VARIABLES: dict[str, set[str]] = {
     "course_question": {"course_name", "question", "language"},
     "rag_answer": {"course_name", "question", "context", "citations", "language"},
     "lecture_summary": {"course_name", "lecture_title", "lecture_text", "language"},
+    "chat_session_summary": {
+        "course_name",
+        "messages",
+        "main_topics",
+        "weaknesses",
+        "next_steps",
+        "language",
+    },
     "quiz_generation": {
         "course_name",
         "topic",
@@ -32,6 +40,7 @@ TEMPLATE_VARIABLES: dict[str, set[str]] = {
         "weak_topics",
         "language",
     },
+    "reminder_generation": {"course_name", "tasks", "deadlines", "weak_topics", "language"},
 }
 
 

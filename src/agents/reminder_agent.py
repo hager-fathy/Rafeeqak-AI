@@ -6,6 +6,8 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from src.localization import normalize_language, t
+from src.prompts import render_prompt
+from src.tools.llm_client import LLMClient
 
 
 class ReminderAgent:
@@ -21,6 +23,9 @@ class ReminderAgent:
         r"\u0646\u0628\u0647\u0646\u064a\s+(.+)",
     )
     DEFAULT_REMINDER_TYPES = ["lecture", "revision", "quiz", "missed_task", "deadline", "study_task", "custom"]
+
+    def __init__(self, *, llm_client: LLMClient | None = None) -> None:
+        self.llm_client = llm_client or LLMClient()
 
     def create(self, *, message: str, context: dict[str, Any], language: str = "en") -> dict[str, Any]:
         language = normalize_language(language)
@@ -38,6 +43,7 @@ class ReminderAgent:
                 "created_count": 0,
                 "reminders": existing_reminders,
                 "new_reminders": [],
+                "llm_generated_count": 0,
                 "response": t("reminder.disabled", language),
             }
 
@@ -96,6 +102,18 @@ class ReminderAgent:
                 )
             )
 
+        llm_candidates = self._llm_reminders(
+            active_plan=active_plan if isinstance(active_plan, dict) else {},
+            context=context,
+            course_id=course_id,
+            course_name=course_name,
+            weak_topics=weak_topics,
+            language=language,
+            preferences=preferences,
+            allowed_types=allowed_types,
+        )
+        candidates.extend(llm_candidates)
+
         reminders, new_reminders = self._merge_reminders(existing_reminders=existing_reminders, candidates=candidates)
         return {
             "ok": True,
@@ -103,6 +121,7 @@ class ReminderAgent:
             "created_count": len(new_reminders),
             "reminders": reminders,
             "new_reminders": new_reminders,
+            "llm_generated_count": len(llm_candidates),
             "response": self._response(reminders=reminders, created_count=len(new_reminders), language=language),
         }
 
@@ -391,3 +410,159 @@ class ReminderAgent:
 
     def _allowed(self, reminders: list[dict[str, Any]], *, allowed_types: set[str]) -> list[dict[str, Any]]:
         return [reminder for reminder in reminders if reminder.get("reminder_type") in allowed_types]
+
+    def _llm_reminders(
+        self,
+        *,
+        active_plan: dict[str, Any],
+        context: dict[str, Any],
+        course_id: str | None,
+        course_name: str | None,
+        weak_topics: list[str],
+        language: str,
+        preferences: dict[str, Any],
+        allowed_types: set[str],
+    ) -> list[dict[str, Any]]:
+        if not self.llm_client.is_available:
+            return []
+
+        prompt = render_prompt(
+            "reminder_generation",
+            course_name=course_name or active_plan.get("course_name") or "Active course",
+            tasks=self._tasks_for_prompt(active_plan),
+            deadlines=self._deadlines_for_prompt(active_plan=active_plan, context=context),
+            weak_topics=self._format_items(weak_topics),
+            language="Arabic" if language == "ar" else "English",
+        )
+        try:
+            payload = self.llm_client.generate_json(
+                system_prompt=prompt.system,
+                user_prompt=prompt.user,
+                temperature=0.2,
+                max_tokens=900,
+            )
+        except Exception:
+            return []
+        if not isinstance(payload, dict) or not isinstance(payload.get("reminders"), list):
+            return []
+
+        reminders = []
+        for item in payload["reminders"][:8]:
+            if not isinstance(item, dict):
+                continue
+            reminder_type = str(item.get("reminder_type") or "custom").strip().lower()
+            if reminder_type not in self.DEFAULT_REMINDER_TYPES or reminder_type not in allowed_types:
+                continue
+            title = " ".join(str(item.get("title") or "").split()).strip()
+            due_at = self._normalize_due_at(item.get("due_at"), preferences=preferences)
+            if not title or due_at is None:
+                continue
+            reminders.append(
+                self._reminder(
+                    course_id=course_id,
+                    course_name=course_name,
+                    reminder_type=reminder_type,
+                    title=title[:120],
+                    due_at=due_at,
+                    source="llm_reminder_generation",
+                    language=language,
+                    topic=item.get("topic"),
+                )
+            )
+        return reminders
+
+    def _tasks_for_prompt(self, active_plan: dict[str, Any]) -> str:
+        tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
+        if not isinstance(tasks, list) or not tasks:
+            return "No study tasks provided."
+
+        lines = []
+        for task in tasks[:12]:
+            if not isinstance(task, dict):
+                continue
+            date_text = str(task.get("date") or "unscheduled")
+            topic = str(task.get("topic") or "Revision")
+            phase = str(task.get("phase") or "study")
+            status = "done" if task.get("completed") else "pending"
+            checkpoint = "checkpoint" if task.get("checkpoint") else "no checkpoint"
+            task_text = " ".join(str(task.get("task") or "").split())
+            lines.append(f"- {date_text} | {topic} | {phase} | {status} | {checkpoint} | {task_text}")
+        return "\n".join(lines) if lines else "No study tasks provided."
+
+    def _deadlines_for_prompt(self, *, active_plan: dict[str, Any], context: dict[str, Any]) -> str:
+        deadlines = []
+        if isinstance(active_plan, dict):
+            exam_date = self._parse_date(active_plan.get("exam_date"))
+            if exam_date:
+                deadlines.append(f"- Exam deadline: {exam_date.isoformat()}")
+
+            plan_deadlines = active_plan.get("deadlines")
+            if isinstance(plan_deadlines, list):
+                deadlines.extend(self._deadline_lines(plan_deadlines))
+
+        context_deadlines = context.get("deadlines")
+        if isinstance(context_deadlines, list):
+            deadlines.extend(self._deadline_lines(context_deadlines))
+
+        unique_deadlines = []
+        seen: set[str] = set()
+        for item in deadlines:
+            normalized = item.casefold()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            unique_deadlines.append(item)
+        return "\n".join(unique_deadlines) if unique_deadlines else "No deadlines provided."
+
+    def _deadline_lines(self, values: list[Any]) -> list[str]:
+        lines = []
+        for value in values[:8]:
+            if isinstance(value, dict):
+                title = str(value.get("title") or value.get("name") or "Deadline").strip()
+                due_at = str(value.get("due_at") or value.get("date") or "").strip()
+                if title or due_at:
+                    lines.append(f"- {title}: {due_at}".strip())
+            else:
+                text = " ".join(str(value or "").split())
+                if text:
+                    lines.append(f"- {text}")
+        return lines
+
+    def _format_items(self, values: list[str]) -> str:
+        return "\n".join(f"- {value}" for value in values) if values else "None."
+
+    def _normalize_due_at(self, value: Any, *, preferences: dict[str, Any]) -> str | None:
+        if isinstance(value, datetime):
+            clean_value = value.replace(second=0, microsecond=0, tzinfo=None)
+            if clean_value.date() < date.today():
+                return None
+            return clean_value.isoformat(timespec="minutes")
+        if isinstance(value, date):
+            if value < date.today():
+                return None
+            return self._combine_date_time(value, self._preferred_time(preferences))
+
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            try:
+                parsed_date = date.fromisoformat(text)
+            except ValueError:
+                return None
+            if parsed_date < date.today():
+                return None
+            return self._combine_date_time(parsed_date, self._preferred_time(preferences))
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            parsed_date = self._parse_date(text)
+            if parsed_date is None:
+                return None
+            if parsed_date < date.today():
+                return None
+            return self._combine_date_time(parsed_date, self._preferred_time(preferences))
+        clean_parsed = parsed.replace(second=0, microsecond=0, tzinfo=None)
+        if clean_parsed.date() < date.today():
+            return None
+        return clean_parsed.isoformat(timespec="minutes")

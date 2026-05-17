@@ -1,6 +1,6 @@
 # Smart Study Planner
 
-This repository contains phases 1 through 12 of the Smart Study Planner Chatbot project, including Supabase memory, multi-agent routing, course-material RAG, quiz generation and evaluation, CAG/database query, multi-course support, localization, prompt templates, upgraded planning, dashboards, settings, and reminders.
+This repository contains phases 1 through 13 of the Smart Study Planner Chatbot project, including Supabase memory, multi-agent routing, course-material RAG, quiz generation and evaluation, CAG/database query, multi-course support, localization, prompt templates, upgraded planning, dashboards, settings, reminders, and final demo preparation.
 
 The enhanced roadmap in `project..md` now upgrades Rafeeqak toward a stronger multi-course study assistant where each course has its own materials, study plan, quizzes, flashcards, weak topics, progress, and chat history.
 
@@ -16,6 +16,7 @@ The enhanced roadmap in `project..md` now upgrades Rafeeqak toward a stronger mu
 - Phase 10: reusable prompt templates for RAG answers, course Q&A, lecture summaries, quiz generation, progress feedback, and study planning
 - Phase 11: personalized planner upgrade with adaptive defaults, weak-topic priority, and recovery guidance
 - Phase 12: dashboard analytics, settings, and course-scoped reminders
+- Phase 13: final demo script, demo materials, and manual validation checklist
 
 ## Quick Start
 
@@ -132,10 +133,14 @@ smart-study-planner/
   - dashboard shows all-course cards, progress, completed/upcoming tasks, quiz averages, weak topics, uploads, deadlines, and reminders
   - Settings page saves name, language, daily study hours, quiz defaults, difficulty defaults, study preference, and reminder preferences
   - reminder records cover lectures, revision sessions, quizzes, missed tasks, weak topics, and deadlines, with local persistence and optional Supabase sync
+- Phase 13 demo flow:
+  - final presenter script is in `docs/final_demo_script.md`
+  - manual validation record is in `docs/manual_demo_validation.md`
+  - ready-to-upload demo materials are in `docs/demo_materials/`
 
 ## Next Phases
 
-Upcoming phases should focus on:
+Remaining demo-hardening work should focus on:
 
-- Final demo hardening and end-to-end validation
-- Additional Phase 13 tests for course selector gating, reminder creation, and demo flows
+- Running the live Streamlit walkthrough in an environment with Python, pytest, Streamlit, and project dependencies installed
+- Updating `docs/manual_demo_validation.md` with pass/fail evidence from that live run
