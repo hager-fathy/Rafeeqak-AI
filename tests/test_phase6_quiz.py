@@ -68,6 +68,90 @@ class DuplicateQuizLLM:
         }
 
 
+class InvalidQuizLLM:
+    is_available = True
+
+    def generate_json(self, **kwargs) -> dict | None:
+        return None
+
+
+class MixedQuizLLM:
+    is_available = True
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def generate_json(self, **kwargs) -> dict:
+        self.calls.append(kwargs)
+        return {
+            "questions": [
+                {
+                    "type": "mcq",
+                    "question": "Which structure maps terms to document lists?",
+                    "choices": ["Inverted index", "Loss curve", "Confusion matrix", "Stack frame"],
+                    "correct_choice": "Inverted index",
+                    "hint": "Think about term lookup.",
+                    "concept": "Term document mapping",
+                    "explanation": "The index maps terms to postings lists.",
+                    "source": "notes",
+                },
+                {
+                    "type": "true_false",
+                    "question": "A postings list can store document identifiers for a term.",
+                    "correct_answer": True,
+                    "hint": "Focus on what postings contain.",
+                    "concept": "Postings list contents",
+                    "source": "notes",
+                },
+                {
+                    "type": "short_answer",
+                    "question": "How does a term lookup structure speed retrieval?",
+                    "expected_answer": "It maps each term to candidate documents so search can avoid scanning every document.",
+                    "keywords": ["term", "candidate", "documents", "scanning"],
+                    "hint": "Name the lookup shortcut.",
+                    "concept": "Efficient term lookup",
+                    "source": "notes",
+                },
+                {
+                    "type": "matching",
+                    "question": "Match each retrieval concept to its role.",
+                    "pairs": [
+                        {"left": "Term", "right": "Search token"},
+                        {"left": "Posting", "right": "Document reference"},
+                    ],
+                    "hint": "Pair item to role.",
+                    "concept": "Retrieval concept roles",
+                    "source": "notes",
+                },
+            ],
+            "flashcards": [],
+        }
+
+
+class ShortAnswerDictLLM:
+    is_available = True
+
+    def generate_json(self, **kwargs) -> dict:
+        return {
+            "questions": {
+                "type": "short_answer",
+                "question": "Why does ranking use relevance signals?",
+                "correct_answer": "Relevance signals help order documents by expected usefulness.",
+                "concept": "Ranking relevance signals",
+                "hint": "Think about ordering results.",
+            }
+        }
+
+
+class CapturingWeakQuizLLM(FakeQuizLLM):
+    def __init__(self) -> None:
+        self.calls = []
+
+    def generate_json(self, **kwargs) -> dict:
+        self.calls.append(kwargs)
+        return super().generate_json(**kwargs)
+
+
 class FakeMemoryAgent:
     def __init__(self) -> None:
         self.calls = []
@@ -179,6 +263,9 @@ def test_quiz_generator_uses_llm_when_available() -> None:
     assert result["generation_mode"] == "llm"
     assert result["count"] == 2
     assert result["questions"][0]["id"] == "llm-1"
+    assert result["questions"][0]["hint"]
+    assert result["questions"][0]["concept"]
+    assert result["questions"][0]["correct_answer"] in result["questions"][0]["options"]
     assert result["flashcards"][0]["front"] == "Backpropagation"
 
 
@@ -192,6 +279,79 @@ def test_quiz_generator_falls_back_when_llm_output_is_incomplete() -> None:
     assert result["generation_mode"] == "offline_template"
     assert result["count"] == 2
     assert all(question["question"] != "Repeated question?" for question in result["questions"])
+
+
+def test_short_answer_llm_dict_is_wrapped_and_normalized() -> None:
+    result = QuizGeneratorAgent(llm_client=ShortAnswerDictLLM()).generate(
+        topic="ranking",
+        count=1,
+        question_types=["short_answer"],
+    )
+
+    question = result["questions"][0]
+    assert result["generation_mode"] == "llm"
+    assert question["type"] == "short_answer"
+    assert question["hint"]
+    assert question["concept"]
+    assert question["correct_answer"] == question["expected_answer"]
+
+
+def test_mixed_llm_generation_preserves_requested_types() -> None:
+    result = QuizGeneratorAgent(llm_client=MixedQuizLLM()).generate(
+        topic="inverted indexes",
+        count=4,
+        question_types=["mcq", "true_false", "short_answer", "matching"],
+    )
+
+    assert [question["type"] for question in result["questions"]] == [
+        "mcq",
+        "true_false",
+        "short_answer",
+        "matching",
+    ]
+    assert all(question["hint"] and question["concept"] for question in result["questions"])
+
+
+def test_invalid_llm_json_uses_varied_fallback_questions() -> None:
+    result = QuizGeneratorAgent(llm_client=InvalidQuizLLM()).generate(topic="Backpropagation", count=5)
+    questions = [question["question"] for question in result["questions"]]
+
+    assert result["generation_mode"] == "offline_template"
+    assert len(questions) == 5
+    assert len(set(questions)) == 5
+    assert all("(variant" not in question.lower() for question in questions)
+
+
+def test_weak_topics_are_included_in_quiz_prompt_context() -> None:
+    llm = CapturingWeakQuizLLM()
+    QuizGeneratorAgent(llm_client=llm).generate(
+        topic="Backpropagation",
+        count=2,
+        weak_topics=["Chain rule mistakes", "Gradient signs"],
+    )
+
+    assert "Priority weak topics or recent mistakes" in llm.calls[0]["user_prompt"]
+    assert "Chain rule mistakes" in llm.calls[0]["user_prompt"]
+    assert "Gradient signs" in llm.calls[0]["user_prompt"]
+
+
+def test_retrieved_context_adds_grounding_instructions_to_llm_prompt() -> None:
+    llm = CapturingWeakQuizLLM()
+    QuizGeneratorAgent(llm_client=llm).generate(
+        topic="inverted indexes",
+        count=2,
+        context_chunks=[
+            {
+                "course_name": "Information Retrieval",
+                "source_name": "ir_notes.txt",
+                "section": "text",
+                "text": "Inverted indexes map search terms to documents.",
+            }
+        ],
+    )
+
+    assert "Use only the provided selected-course context" in llm.calls[0]["system_prompt"]
+    assert "Inverted indexes map search terms to documents" in llm.calls[0]["user_prompt"]
 
 
 def test_quiz_generator_deduplicates_context_chunks() -> None:

@@ -33,6 +33,7 @@ class SemanticResponseCache:
         message: str,
         language: str,
         context_fingerprint: str,
+        course_id: str | None = None,
     ) -> dict[str, Any] | None:
         query_vector = self._embed(message)
         if not query_vector:
@@ -42,6 +43,8 @@ class SemanticResponseCache:
         candidates = []
         for entry in store["entries"]:
             if entry.get("language") != language:
+                continue
+            if entry.get("course_id") != course_id:
                 continue
             if entry.get("context_fingerprint") != context_fingerprint:
                 continue
@@ -77,6 +80,7 @@ class SemanticResponseCache:
         response: str,
         payload: dict[str, Any],
         context_fingerprint: str,
+        course_id: str | None = None,
     ) -> None:
         embedding = self._embed(message)
         if not embedding or not response.strip():
@@ -89,6 +93,7 @@ class SemanticResponseCache:
             if not (
                 entry.get("message_normalized") == self._normalize(message)
                 and entry.get("language") == language
+                and entry.get("course_id") == course_id
                 and entry.get("context_fingerprint") == context_fingerprint
             )
         ]
@@ -101,6 +106,7 @@ class SemanticResponseCache:
                 "agent": agent,
                 "response": response,
                 "payload": self._safe_payload(payload),
+                "course_id": course_id,
                 "context_fingerprint": context_fingerprint,
                 "embedding": embedding,
                 "hits": 0,

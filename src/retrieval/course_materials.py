@@ -247,6 +247,31 @@ class CourseMaterialIndexer:
 
         return sorted(scored_chunks, key=lambda item: item.score, reverse=True)[:top_k]
 
+    def topic_suggestions(self, *, course_id: str | None = None, limit: int = 3) -> list[str]:
+        """Return lightweight topic hints from indexed chunks in one course scope."""
+        store = self._load_store()
+        candidates: list[str] = []
+        for chunk in store["chunks"]:
+            if course_id is not None and chunk.get("course_id") != course_id:
+                continue
+            source_stem = Path(str(chunk.get("source_name") or "")).stem
+            if source_stem:
+                candidates.append(source_stem)
+            candidates.extend(self._keyword_suggestions(str(chunk.get("text") or "")))
+
+        suggestions = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            normalized = self._clean_topic(candidate)
+            key = normalized.casefold()
+            if not normalized or key in seen:
+                continue
+            suggestions.append(normalized)
+            seen.add(key)
+            if len(suggestions) >= limit:
+                break
+        return suggestions
+
     def chunks_for_source(
         self,
         source_name: str,
@@ -411,3 +436,36 @@ class CourseMaterialIndexer:
         if not course_id:
             return self.uploads_dir
         return self.uploads_dir / course_id
+
+    def _keyword_suggestions(self, text: str) -> list[str]:
+        tokens = [token for token in TOKEN_PATTERN.findall(text) if len(token) > 2]
+        stopwords = {
+            "and",
+            "are",
+            "for",
+            "from",
+            "into",
+            "that",
+            "the",
+            "this",
+            "through",
+            "using",
+            "with",
+        }
+        suggestions = []
+        for index in range(len(tokens)):
+            window = tokens[index : index + 3]
+            if len(window) < 2:
+                continue
+            if all(token.casefold() in stopwords for token in window):
+                continue
+            phrase = " ".join(window)
+            if any(token.casefold() not in stopwords for token in window):
+                suggestions.append(phrase)
+        return suggestions
+
+    def _clean_topic(self, value: str) -> str:
+        cleaned = re.sub(r"^\d{8}_\d{6}_", "", str(value or ""))
+        cleaned = re.sub(r"[_\-]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,:;")
+        return cleaned[:80]

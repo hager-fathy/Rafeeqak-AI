@@ -5,8 +5,13 @@ Difficulty: {{difficulty}}
 Question types: {{question_types}}
 Number of questions: {{number_of_questions}}
 
+Priority weak topics or recent mistakes:
+{{weak_topics}}
+
 Course context:
 {{context}}
 
 Previous questions to avoid:
 {{avoid_questions}}
+
+Generate the requested quiz as JSON only.

@@ -14,7 +14,10 @@ from src.agents.reminder_agent import ReminderAgent
 from src.agents.safety_agent import SafetyAgent
 from src.agents.study_planner import StudyPlannerAgent
 from src.localization import DEFAULT_LANGUAGE, detect_language, normalize_language, t
+from src.prompts import build_system_prompt
+from src.tools.llm_client import LLMClient
 from src.tools.output_filter import filter_output
+from src.tools.quiz_history import quiz_history_avoid_questions
 from src.tools.semantic_cache import SemanticResponseCache
 
 
@@ -33,6 +36,7 @@ class SupervisorAgent:
         reminder_agent: ReminderAgent | None = None,
         semantic_cache: SemanticResponseCache | None = None,
         safety: SafetyAgent | None = None,
+        llm_client: LLMClient | None = None,
     ) -> None:
         self.router = router or InputRouterAgent()
         self.study_planner = study_planner or StudyPlannerAgent()
@@ -43,6 +47,7 @@ class SupervisorAgent:
         self.reminder_agent = reminder_agent or ReminderAgent()
         self.semantic_cache = semantic_cache or SemanticResponseCache()
         self.safety = safety or SafetyAgent()
+        self.llm_client = llm_client or getattr(self.course_rag, "llm_client", None) or LLMClient()
 
     def decide(self, routed_input: dict[str, Any]) -> str:
         intent = routed_input.get("intent", "chat")
@@ -169,6 +174,7 @@ class SupervisorAgent:
             cached_result = self.semantic_cache.lookup(
                 message=routed_input["message"],
                 language=routed_input["language"],
+                course_id=context.get("active_course_id"),
                 context_fingerprint=context_fingerprint,
             )
             if cached_result is not None:
@@ -217,7 +223,10 @@ class SupervisorAgent:
                     "SemanticCache",
                     "checked local semantic cache for a reusable answer",
                     "miss",
-                    {"context_fingerprint": context_fingerprint},
+                    {
+                        "active_course_id": context.get("active_course_id"),
+                        "context_fingerprint": context_fingerprint,
+                    },
                 )
             )
         else:
@@ -266,6 +275,7 @@ class SupervisorAgent:
                 agent=selected_agent,
                 response=finalized["response"],
                 payload=agent_result.get("payload", {}),
+                course_id=context.get("active_course_id"),
                 context_fingerprint=context_fingerprint,
             )
 
@@ -432,7 +442,12 @@ class SupervisorAgent:
             language=routed_input["language"],
             difficulty=context.get("quiz_difficulty", "medium"),
             question_types=context.get("question_types") or ["mcq"],
-            previous_questions=context.get("generated_questions") or [],
+            previous_questions=quiz_history_avoid_questions(
+                context.get("generated_questions") or [],
+                course_id=context.get("active_course_id"),
+                topic=topic,
+            ),
+            weak_topics=self._weak_topics_for_quiz(context, requested_topic=topic),
         )
         response = t("agent.quiz.prepared", routed_input["language"], count=quiz_result["count"], topic=topic)
         return {
@@ -453,6 +468,37 @@ class SupervisorAgent:
             ],
         }
 
+    def _weak_topics_for_quiz(self, context: dict[str, Any], *, requested_topic: str) -> list[str]:
+        active_plan = context.get("active_plan") if isinstance(context.get("active_plan"), dict) else {}
+        raw_topics: list[str] = list(active_plan.get("weak_topics", []) or [])
+        for attempt in list(context.get("quiz_attempts", []) or [])[-8:]:
+            if not isinstance(attempt, dict):
+                continue
+            raw_topics.extend(attempt.get("weak_topics", []) or [])
+            try:
+                score = float(attempt.get("score_percent", 100))
+            except (TypeError, ValueError):
+                score = 100.0
+            topic = str(attempt.get("topic") or "").strip()
+            if topic and score < 70:
+                raw_topics.append(topic)
+
+        topics = []
+        seen: set[str] = set()
+        for item in raw_topics:
+            topic = " ".join(str(item or "").split())
+            key = topic.casefold()
+            if not topic or key in seen:
+                continue
+            topics.append(topic)
+            seen.add(key)
+            if len(topics) == 8:
+                break
+        requested = " ".join(str(requested_topic or "").split())
+        if requested and requested.casefold() not in seen:
+            topics.append(requested)
+        return topics[:8]
+
     def _run_course_rag(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         uploads = context.get("uploads", [])
         rag_result = self.course_rag.answer(
@@ -460,6 +506,7 @@ class SupervisorAgent:
             language=routed_input["language"],
             course_id=context.get("active_course_id"),
             course_name=context.get("active_course_name"),
+            memory=self._chatbot_memory_context(context),
         )
         action = (
             "asked for a clearer topic before retrieving course-material chunks"
@@ -480,6 +527,9 @@ class SupervisorAgent:
                         "indexed_files": rag_result["stats"]["files"],
                         "indexed_chunks": rag_result["stats"]["chunks"],
                         "citations": rag_result["citations"],
+                        "retrieved_chunk_course_ids": [
+                            match.get("course_id") for match in rag_result.get("matches", [])
+                        ],
                     },
                 )
             ],
@@ -558,20 +608,167 @@ class SupervisorAgent:
 
     def _run_response_agent(self, *, routed_input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         has_active_plan = context.get("active_plan") is not None
+        llm_response = self._compose_general_chat_response(routed_input=routed_input, context=context)
+        if llm_response:
+            return {
+                "response": llm_response,
+                "payload": {
+                    "has_active_plan": has_active_plan,
+                    "generation_mode": "llm",
+                    "memory_context_used": bool(self._chatbot_memory_context(context)),
+                },
+                "trace_steps": [
+                    self._trace_step(
+                        "run_agent",
+                        "ResponseAgent",
+                        "handled general study-coach reply with the chatbot prompt",
+                        "completed",
+                        {"has_active_plan": has_active_plan, "generation_mode": "llm"},
+                    )
+                ],
+            }
+
         response_key = "agent.response.ready" if has_active_plan else "agent.response.no_plan"
         return {
             "response": t(response_key, routed_input["language"]),
-            "payload": {"has_active_plan": has_active_plan},
+            "payload": {"has_active_plan": has_active_plan, "generation_mode": "fallback"},
             "trace_steps": [
                 self._trace_step(
                     "run_agent",
                     "ResponseAgent",
-                    "handled general study-coach reply",
+                    "handled general study-coach reply with local fallback",
                     "completed",
                     {"has_active_plan": has_active_plan},
                 )
             ],
         }
+
+    def _compose_general_chat_response(
+        self,
+        *,
+        routed_input: dict[str, Any],
+        context: dict[str, Any],
+    ) -> str | None:
+        if not getattr(self.llm_client, "is_available", False):
+            return None
+
+        language = routed_input["language"]
+        response_language = "Arabic" if language == "ar" else "English"
+        system_prompt = build_system_prompt(
+            course_name=context.get("active_course_name") or ("هذا المقرر" if language == "ar" else "this course"),
+            course_id=context.get("active_course_id") or "",
+            language=response_language,
+            memory=self._chatbot_memory_context(context),
+            context="No source material retrieved for this query.",
+        )
+        user_prompt = (
+            "Student question:\n"
+            f"{routed_input['message']}\n\n"
+            f"Answer in {response_language}:"
+        )
+        try:
+            return self.llm_client.generate_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.2,
+                max_tokens=500,
+            )
+        except Exception:
+            return None
+
+    def _chatbot_memory_context(self, context: dict[str, Any]) -> str:
+        course_id = context.get("active_course_id")
+        course_name = context.get("active_course_name")
+        active_plan = context.get("active_plan") if isinstance(context.get("active_plan"), dict) else {}
+        if not active_plan and not context.get("quiz_attempts") and not context.get("reminders"):
+            return ""
+
+        from src.tools.study_plan_tasks import is_task_completed, list_pending_tasks
+
+        tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
+        completed_tasks = [
+            task
+            for task in tasks
+            if isinstance(task, dict) and is_task_completed(task, active_plan)
+        ]
+        pending_tasks = list_pending_tasks(active_plan, course_scope=course_id) if active_plan else []
+        weak_topics = list(active_plan.get("weak_topics", []) if isinstance(active_plan, dict) else [])
+        quiz_attempts = [item for item in context.get("quiz_attempts", []) or [] if isinstance(item, dict)]
+        for attempt in quiz_attempts:
+            weak_topics.extend(attempt.get("weak_topics", []) or [])
+        reminders = [item for item in context.get("reminders", []) or [] if isinstance(item, dict)]
+        pending_reminders = [item for item in reminders if item.get("status") != "done"]
+
+        lines = [
+            f"Active course: {course_name or 'Unknown course'}",
+            f"Active course ID: {course_id or 'unknown'}",
+        ]
+        if active_plan:
+            lines.extend(
+                [
+                    f"Exam date: {active_plan.get('exam_date') or 'not set'}",
+                    f"Pending tasks: {len(pending_tasks)}",
+                    f"Completed tasks: {len(completed_tasks)}",
+                ]
+            )
+            if pending_tasks:
+                pending_preview = [
+                    self._task_memory_line(task)
+                    for task in pending_tasks[:5]
+                    if isinstance(task, dict)
+                ]
+                lines.append("Pending task preview: " + "; ".join(pending_preview))
+            if completed_tasks:
+                completed_preview = [
+                    self._task_memory_line(task)
+                    for task in completed_tasks[-3:]
+                    if isinstance(task, dict)
+                ]
+                lines.append("Recently completed tasks: " + "; ".join(completed_preview))
+
+        unique_weak_topics = self._unique_strings(weak_topics)
+        if unique_weak_topics:
+            lines.append("Weak topics: " + ", ".join(unique_weak_topics[:8]))
+        if quiz_attempts:
+            latest_quiz = quiz_attempts[-1]
+            lines.append(
+                "Latest quiz: "
+                f"{latest_quiz.get('topic') or 'unknown topic'} "
+                f"score {latest_quiz.get('score_percent', 'unknown')}%"
+            )
+        if pending_reminders:
+            lines.append(f"Pending reminders: {len(pending_reminders)}")
+        chat_summaries = [item for item in context.get("chat_summaries", []) or [] if isinstance(item, dict)]
+        if chat_summaries:
+            latest_summary = chat_summaries[-1]
+            summary_text = " ".join(str(latest_summary.get("summary") or "").split())
+            if summary_text:
+                lines.append(f"Latest chat summary: {summary_text[:300]}")
+        return "\n".join(lines)
+
+    def _task_memory_line(self, task: dict[str, Any]) -> str:
+        topic = " ".join(str(task.get("topic") or "untitled task").split())
+        date = " ".join(str(task.get("date") or "unscheduled").split())
+        phase = " ".join(str(task.get("phase") or "").split())
+        hours = task.get("hours")
+        parts = [topic, date]
+        if phase:
+            parts.append(phase)
+        if hours:
+            parts.append(f"{hours}h")
+        return " / ".join(parts)
+
+    def _unique_strings(self, values: list[Any]) -> list[str]:
+        unique = []
+        seen: set[str] = set()
+        for value in values:
+            normalized = " ".join(str(value or "").split())
+            key = normalized.casefold()
+            if not normalized or key in seen:
+                continue
+            unique.append(normalized)
+            seen.add(key)
+        return unique
 
     def _filter_student_response(self, response: str, language: str) -> str:
         return filter_output(response, language)

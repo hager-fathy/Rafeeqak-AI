@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.localization import normalize_language, t
 from src.prompts import render_prompt
+from src.prompts.templates.chatbot_answer import build_system_prompt
 from src.retrieval import CourseMaterialIndexer, RetrievedChunk
 from src.tools.llm_client import LLMClient
 
@@ -124,17 +125,19 @@ class CourseRAGAgent:
         language: str = "en",
         course_id: str | None = None,
         course_name: str | None = None,
+        memory: str | None = None,
     ) -> dict:
         language = normalize_language(language)
         if self.needs_clarification(question, language=language):
+            stats = self._safe_stats(course_id=course_id)
             return {
                 "ok": False,
                 "status": "needs_clarification",
-                "response": self._clarification_response(language),
+                "response": self._clarification_response(language, course_id=course_id, stats=stats),
                 "question": question,
                 "citations": [],
                 "matches": [],
-                "stats": self._empty_stats(),
+                "stats": stats,
                 "generation_mode": "clarification",
                 "course_id": course_id,
                 "course_name": course_name,
@@ -146,7 +149,7 @@ class CourseRAGAgent:
             return {
                 "ok": False,
                 "status": "no_materials",
-                "response": self._no_materials_response(language),
+                "response": self._no_materials_response(language, course_name=course_name),
                 "question": question,
                 "citations": [],
                 "matches": [],
@@ -155,14 +158,15 @@ class CourseRAGAgent:
                 "course_name": course_name,
             }
 
+        raw_matches = self.indexer.search(question, top_k=self.top_k, course_id=course_id)
         matches = self._deduplicate_matches(
-            self.indexer.search(question, top_k=self.top_k, course_id=course_id)
+            self._filter_matches_to_course(raw_matches, course_id=course_id)
         )
         if not matches:
             return {
                 "ok": False,
                 "status": "no_relevant_match",
-                "response": self._no_match_response(language),
+                "response": self._no_match_response(language, course_name=course_name),
                 "question": question,
                 "citations": [],
                 "matches": [],
@@ -171,7 +175,14 @@ class CourseRAGAgent:
                 "course_name": course_name,
             }
 
-        response, generation_mode = self._compose_answer(question, matches, language=language, course_name=course_name)
+        response, generation_mode = self._compose_answer(
+            question,
+            matches,
+            language=language,
+            course_id=course_id,
+            course_name=course_name,
+            memory=memory,
+        )
         return {
             "ok": True,
             "status": "answered",
@@ -183,6 +194,8 @@ class CourseRAGAgent:
                     "source_name": match.source_name,
                     "section": match.section,
                     "chunk_index": match.chunk_index,
+                    "course_id": match.course_id,
+                    "course_name": match.course_name,
                     "score": match.score,
                     "text": match.text,
                     "citation": self._source_label(match, course_name=course_name),
@@ -201,13 +214,17 @@ class CourseRAGAgent:
         matches: list[RetrievedChunk],
         *,
         language: str,
+        course_id: str | None,
         course_name: str | None,
+        memory: str | None,
     ) -> tuple[str, str]:
         llm_answer = self._compose_llm_answer(
             question,
             matches,
             language=language,
+            course_id=course_id,
             course_name=course_name,
+            memory=memory,
         )
         if llm_answer:
             return self._with_sources(llm_answer, matches, language, course_name=course_name), "llm"
@@ -219,11 +236,22 @@ class CourseRAGAgent:
             course_name=course_name,
         ), "offline_template"
 
-    def _no_materials_response(self, language: str) -> str:
-        return t("rag.no_materials", language)
+    def _no_materials_response(self, language: str, *, course_name: str | None = None) -> str:
+        if language == "ar":
+            return (
+                "لا توجد مواد مرفوعة كافية لهذا السؤال في المقرر المحدد. "
+                "جرّب رفع المحاضرة أو الفصل المناسب."
+            )
+        return (
+            "The selected course doesn't have enough uploaded material yet for this question. "
+            "Try uploading the relevant lecture or chapter."
+        )
 
-    def _no_match_response(self, language: str) -> str:
-        return t("rag.no_match", language)
+    def _no_match_response(self, language: str, *, course_name: str | None = None) -> str:
+        resolved_course = course_name or ("هذا المقرر" if language == "ar" else "this course")
+        if language == "ar":
+            return f"لم أجد ذلك في المواد المرفوعة لمقرر {resolved_course}."
+        return f"I couldn't find that in the uploaded material for {resolved_course}."
 
     def needs_clarification(self, question: str, *, language: str = "en") -> bool:
         language = normalize_language(language)
@@ -246,11 +274,44 @@ class CourseRAGAgent:
 
         return len(tokens) < 3 and not self._has_topic_signal(topic_tokens)
 
-    def _clarification_response(self, language: str) -> str:
-        return t("rag.clarify", language)
+    def _clarification_response(self, language: str, *, course_id: str | None = None, stats: dict | None = None) -> str:
+        stats = stats or self._empty_stats()
+        suggestions = self._course_topic_suggestions(course_id=course_id)
+        if stats.get("chunks", 0) == 0 and course_id:
+            return self._no_materials_response(language)
+        if language == "ar":
+            base = "\u0645\u0645\u0643\u0646 \u062a\u062d\u062f\u062f \u0627\u0644\u0645\u0648\u0636\u0648\u0639 \u0627\u0644\u0644\u064a \u062a\u062d\u0628 \u0623\u0644\u062e\u0635\u0647 \u0623\u0648 \u0623\u0634\u0631\u062d\u0647\u061f"
+            if suggestions:
+                return base + "\n\u0645\u062b\u0627\u0644:\n\n" + "\n".join(
+                    f"- \u0644\u062e\u0635 {topic}" for topic in suggestions
+                )
+            return base
+
+        base = "What topic would you like me to summarize or explain?"
+        if suggestions:
+            return base + "\nFor example:\n\n" + "\n".join(f"- Summarize {topic}" for topic in suggestions)
+        return base
 
     def _empty_stats(self) -> dict:
         return {"files": 0, "chunks": 0, "sources": [], "updated_at_utc": None}
+
+    def _safe_stats(self, *, course_id: str | None = None) -> dict:
+        stats = getattr(self.indexer, "stats", None)
+        if not callable(stats):
+            return self._empty_stats()
+        try:
+            return stats(course_id=course_id)
+        except Exception:
+            return self._empty_stats()
+
+    def _course_topic_suggestions(self, *, course_id: str | None = None) -> list[str]:
+        suggestions = getattr(self.indexer, "topic_suggestions", None)
+        if not callable(suggestions):
+            return []
+        try:
+            return suggestions(course_id=course_id, limit=3)
+        except Exception:
+            return []
 
     def _trim_to_sentence(self, text: str, *, max_length: int = 420) -> str:
         compact = " ".join(text.split())
@@ -304,7 +365,9 @@ class CourseRAGAgent:
         matches: list[RetrievedChunk],
         *,
         language: str,
+        course_id: str | None,
         course_name: str | None,
+        memory: str | None,
     ) -> str | None:
         if not self.llm_client.is_available:
             return None
@@ -317,6 +380,13 @@ class CourseRAGAgent:
             )
         response_language = "Arabic" if language == "ar" else "English"
         joined_sources = "\n\n".join(source_blocks)
+        system_prompt = build_system_prompt(
+            course_name=course_name or ("هذا المقرر" if language == "ar" else "this course"),
+            course_id=course_id or "",
+            language=response_language,
+            memory=memory or "",
+            context=joined_sources,
+        )
         prompt = render_prompt(
             "rag_answer",
             course_name=course_name or (
@@ -331,7 +401,7 @@ class CourseRAGAgent:
         )
         try:
             return self.llm_client.generate_text(
-                system_prompt=prompt.system,
+                system_prompt=system_prompt,
                 user_prompt=prompt.user,
                 temperature=0.2,
                 max_tokens=700,
@@ -350,6 +420,16 @@ class CourseRAGAgent:
             unique_matches.append(match)
         return unique_matches
 
+    def _filter_matches_to_course(
+        self,
+        matches: list[RetrievedChunk],
+        *,
+        course_id: str | None = None,
+    ) -> list[RetrievedChunk]:
+        if course_id is None:
+            return list(matches)
+        return [match for match in matches if match.course_id == course_id]
+
     def _match_key(self, match: RetrievedChunk) -> tuple[str, str, str]:
         source_name = " ".join(str(match.source_name or "").casefold().split())
         section = " ".join(str(match.section or "").casefold().split())
@@ -363,22 +443,24 @@ class CourseRAGAgent:
         heading = "\u0627\u0644\u0645\u0635\u0627\u062f\u0631:" if language == "ar" else "Sources:"
         lines = [heading, ""]
         for match in matches:
-            lines.append(f"- {self._source_label(match, course_name=course_name)}")
+            lines.append(self._source_label(match, course_name=course_name))
         return "\n".join(lines)
 
     def _source_label(self, match: RetrievedChunk, *, course_name: str | None = None) -> str:
         resolved_course = " ".join(str(match.course_name or course_name or "").split())
-        source_name = " ".join(str(match.source_name or "uploaded material").split())
+        source_name = " ".join(str(match.source_name or "").split())
         section = " ".join(str(match.section or "").split())
         chunk_index = getattr(match, "chunk_index", None) or 1
-        parts = []
-        if resolved_course:
-            parts.append(resolved_course)
-        parts.append(source_name)
+        if not resolved_course:
+            resolved_course = course_name or "this course"
+        if not source_name:
+            return f"📄 {resolved_course} | Source: retrieved material - metadata unavailable"
+
         if section:
-            parts.append(section)
-        parts.append(f"chunk {chunk_index}")
-        return ", ".join(parts)
+            page_or_chunk = section if section.casefold().startswith("page") else f"{section}/chunk {chunk_index}"
+        else:
+            page_or_chunk = f"chunk {chunk_index}"
+        return f"📄 {resolved_course} | {source_name} | Page/Chunk: {page_or_chunk}"
 
     def _with_sources(
         self,

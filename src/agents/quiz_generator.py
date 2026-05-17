@@ -17,6 +17,7 @@ class QuizGeneratorAgent:
     MAX_QUESTION_COUNT = 20
     ALLOWED_DIFFICULTIES = {"easy", "medium", "hard"}
     ALLOWED_QUESTION_TYPES = {"mcq", "true_false", "short_answer", "matching"}
+    # TODO: Add image-aware quiz prompts only after the app has multimodal upload and LLM plumbing.
 
     GENERIC_ENGLISH_TEMPLATES = [
         {
@@ -118,6 +119,7 @@ class QuizGeneratorAgent:
         question_types: list[str] | None = None,
         previous_questions: list[str] | None = None,
         avoid_questions: list[str] | None = None,
+        weak_topics: list[str] | None = None,
     ) -> dict[str, Any]:
         language = normalize_language(language)
         clean_topic = self._clean_topic(topic)
@@ -125,6 +127,7 @@ class QuizGeneratorAgent:
         difficulty = self._normalize_difficulty(difficulty)
         context_chunks = self._prepare_context_chunks(context_chunks or [])
         selected_types = self._normalize_question_types(question_types)
+        priority_weak_topics = self._normalize_weak_topics(weak_topics)
         avoid_question_texts = [
             str(item)
             for item in [*(avoid_questions or []), *(previous_questions or [])]
@@ -134,7 +137,7 @@ class QuizGeneratorAgent:
         previous_normalized.discard("")
         rng = random.Random(
             f"{clean_topic.lower()}::{question_count}::{language}::{difficulty}::"
-            f"{','.join(selected_types)}::{len(previous_normalized)}"
+            f"{','.join(selected_types)}::{len(previous_normalized)}::{','.join(priority_weak_topics)}"
         )
 
         llm_quiz = self._generate_with_llm(
@@ -146,6 +149,7 @@ class QuizGeneratorAgent:
             question_types=selected_types,
             avoid_questions=avoid_question_texts,
             previous_normalized=previous_normalized,
+            weak_topics=priority_weak_topics,
             rng=rng,
         )
         if llm_quiz:
@@ -166,12 +170,19 @@ class QuizGeneratorAgent:
             flashcards = self._flashcards(clean_topic, context_chunks=context_chunks, language=language)
             generation_mode = "offline_template"
 
+        questions = self._finalize_questions(
+            questions,
+            topic=clean_topic,
+            language=language,
+            difficulty=difficulty,
+        )
         limited_material = len(questions) < question_count
         quiz = {
             "topic": clean_topic,
             "language": language,
             "difficulty": difficulty,
             "question_types": selected_types,
+            "weak_topics": priority_weak_topics,
             "questions": questions,
             "flashcards": flashcards,
             "source_count": len(context_chunks),
@@ -510,9 +521,10 @@ class QuizGeneratorAgent:
         question_types: list[str],
         avoid_questions: list[str],
         previous_normalized: set[str],
+        weak_topics: list[str],
         rng: random.Random,
     ) -> dict[str, Any] | None:
-        if not self.llm_client.is_available or question_types != ["mcq"]:
+        if not self.llm_client.is_available:
             return None
 
         source_text = "\n\n".join(
@@ -521,49 +533,85 @@ class QuizGeneratorAgent:
             for chunk in context_chunks[:5]
             if self._trim(chunk.get("text", ""), max_length=700)
         )
+        has_context = bool(source_text)
         if not source_text:
             source_text = "No uploaded material excerpts were retrieved. Generate from the topic only."
 
         response_language = "Arabic" if language == "ar" else "English"
-        avoid_text = self._format_avoid_questions(avoid_questions)
-        prompt = render_prompt(
-            "quiz_generation",
-            course_name=self._course_name_from_context(context_chunks),
-            topic=topic,
-            difficulty=difficulty,
-            number_of_questions=count,
-            question_types=", ".join(question_types),
-            context=source_text,
-            avoid_questions=avoid_text,
-            language=response_language,
-        )
+        best_questions: list[dict[str, Any]] = []
+        flashcards: list[dict[str, str]] = []
+        retry_avoid_questions = list(avoid_questions)
 
-        try:
-            payload = self.llm_client.generate_json(
-                system_prompt=prompt.system,
-                user_prompt=prompt.user,
-                temperature=0.4,
-                max_tokens=1600,
+        for attempt in range(2):
+            prompt = render_prompt(
+                "quiz_generation",
+                course_name=self._course_name_from_context(context_chunks),
+                topic=topic,
+                difficulty=difficulty,
+                difficulty_description=self._difficulty_description(difficulty),
+                number_of_questions=count,
+                question_types=", ".join(question_types),
+                type_instructions=self._type_instructions(question_types, language=language),
+                context=source_text,
+                grounding_instructions=self._grounding_instructions(has_context=has_context),
+                avoid_questions=self._format_avoid_questions(retry_avoid_questions),
+                weak_topics=self._format_weak_topics(weak_topics),
+                language=response_language,
             )
-        except Exception:
-            return None
-        if not payload:
+
+            try:
+                payload = self.llm_client.generate_json(
+                    system_prompt=prompt.system,
+                    user_prompt=prompt.user,
+                    temperature=0.35 if has_context else 0.45,
+                    max_tokens=2200,
+                )
+            except Exception:
+                return None
+            if not payload:
+                return None
+
+            raw_questions = payload.get("questions") if isinstance(payload, dict) else payload
+            questions = self._normalize_llm_questions(
+                raw_questions,
+                topic=topic,
+                count=count,
+                difficulty=difficulty,
+                question_types=question_types,
+                language=language,
+                previous_normalized=previous_normalized,
+                rng=rng,
+            )
+            if len(questions) > len(best_questions):
+                best_questions = questions
+                flashcards = self._normalize_llm_flashcards(payload.get("flashcards"))
+            if len(best_questions) >= count:
+                break
+            if attempt == 0:
+                retry_avoid_questions.extend(self._raw_question_texts(raw_questions))
+
+        if not best_questions:
             return None
 
-        questions = self._normalize_llm_questions(
-            payload.get("questions"),
-            topic=topic,
-            count=count,
-            difficulty=difficulty,
-            previous_normalized=previous_normalized,
-            rng=rng,
-        )
-        if len(questions) != count:
-            return None
-        flashcards = self._normalize_llm_flashcards(payload.get("flashcards"))
+        questions = best_questions[:count]
+        if len(questions) < count:
+            used_normalized = {normalize_question_text(item["question"]) for item in questions}
+            used_normalized.update(previous_normalized)
+            questions.extend(
+                self._offline_questions(
+                    topic=topic,
+                    count=count - len(questions),
+                    language=language,
+                    difficulty=difficulty,
+                    question_types=question_types,
+                    previous_normalized=used_normalized,
+                    context_chunks=context_chunks,
+                    rng=rng,
+                )
+            )
         if not flashcards:
             flashcards = self._flashcards(topic, context_chunks=context_chunks, language=language)
-        return {"questions": questions, "flashcards": flashcards}
+        return {"questions": questions[:count], "flashcards": flashcards}
 
     def _normalize_llm_questions(
         self,
@@ -572,9 +620,13 @@ class QuizGeneratorAgent:
         topic: str,
         count: int,
         difficulty: str,
+        question_types: list[str],
+        language: str,
         previous_normalized: set[str],
         rng: random.Random,
     ) -> list[dict[str, Any]]:
+        if isinstance(raw_questions, dict):
+            raw_questions = [raw_questions]
         if not isinstance(raw_questions, list):
             return []
 
@@ -586,45 +638,260 @@ class QuizGeneratorAgent:
                 break
             if not isinstance(item, dict):
                 continue
-            options = item.get("options")
-            answer_index = item.get("answer_index")
-            if not isinstance(options, list) or len(options) != 4:
-                continue
-            try:
-                answer_index = int(answer_index)
-            except (TypeError, ValueError):
-                continue
-            if answer_index not in range(4):
-                continue
+            requested_type = question_types[(index - 1) % len(question_types)]
+            question_type = self._normalize_llm_question_type(item.get("type"), fallback=requested_type)
+            if question_type not in question_types:
+                question_type = requested_type
             question_text = str(item.get("question") or "").strip()
             if not question_text:
-                continue
-            clean_options = [str(option).strip() for option in options]
-            if any(not option for option in clean_options):
-                continue
-            if len({self._normalize_text(option) for option in clean_options}) != 4:
                 continue
             normalized_question = normalize_question_text(question_text)
             if not normalized_question or normalized_question in used_normalized:
                 continue
-            correct_answer = clean_options[answer_index]
-            distractors = [option for option_index, option in enumerate(clean_options) if option_index != answer_index]
-            shuffled_options, shuffled_answer_index = self._shuffle_options(correct_answer, distractors, rng)
-            questions.append(
-                {
-                    "id": f"llm-{index}",
-                    "type": "mcq",
-                    "topic": topic,
-                    "difficulty": difficulty,
-                    "question": question_text,
-                    "options": shuffled_options,
-                    "answer_index": shuffled_answer_index,
-                    "explanation": str(item.get("explanation") or "").strip(),
-                    "source": str(item.get("source") or "llm").strip(),
-                }
-            )
+
+            normalized_item: dict[str, Any] | None
+            if question_type == "mcq":
+                normalized_item = self._normalize_llm_mcq(
+                    item,
+                    question_text=question_text,
+                    topic=topic,
+                    difficulty=difficulty,
+                    index=index,
+                    rng=rng,
+                )
+            elif question_type == "true_false":
+                normalized_item = self._normalize_llm_true_false(
+                    item,
+                    question_text=question_text,
+                    topic=topic,
+                    difficulty=difficulty,
+                    index=index,
+                    language=language,
+                )
+            elif question_type == "short_answer":
+                normalized_item = self._normalize_llm_short_answer(
+                    item,
+                    question_text=question_text,
+                    topic=topic,
+                    difficulty=difficulty,
+                    index=index,
+                )
+            elif question_type == "matching":
+                normalized_item = self._normalize_llm_matching(
+                    item,
+                    question_text=question_text,
+                    topic=topic,
+                    difficulty=difficulty,
+                    index=index,
+                )
+            else:
+                normalized_item = None
+            if not normalized_item:
+                continue
+            normalized_item["hint"] = self._clean_hint(item.get("hint"), topic=topic)
+            normalized_item["concept"] = self._concept_label(item.get("concept") or topic, topic=topic)
+            normalized_item["explanation"] = str(item.get("explanation") or normalized_item.get("explanation") or "").strip()
+            normalized_item["source"] = str(item.get("source") or normalized_item.get("source") or "llm").strip()
+            questions.append(normalized_item)
             used_normalized.add(normalized_question)
         return questions
+
+    def _normalize_llm_mcq(
+        self,
+        item: dict[str, Any],
+        *,
+        question_text: str,
+        topic: str,
+        difficulty: str,
+        index: int,
+        rng: random.Random,
+    ) -> dict[str, Any] | None:
+        options = item.get("options") or item.get("choices")
+        if not isinstance(options, list):
+            return None
+        clean_options = [str(option).strip() for option in options if str(option or "").strip()]
+        correct_answer = self._llm_correct_answer(item, clean_options)
+        if not correct_answer:
+            return None
+        clean_options = self._dedupe_options([correct_answer, *clean_options])
+        distractors = [option for option in clean_options if self._normalize_text(option) != self._normalize_text(correct_answer)]
+        shuffled_options, shuffled_answer_index = self._shuffle_options(correct_answer, distractors, rng)
+        if self._answer_leaks_in_question(question_text, correct_answer):
+            return None
+        return {
+            "id": f"llm-{index}",
+            "type": "mcq",
+            "topic": topic,
+            "difficulty": difficulty,
+            "question": question_text,
+            "options": shuffled_options,
+            "answer_index": shuffled_answer_index,
+        }
+
+    def _normalize_llm_true_false(
+        self,
+        item: dict[str, Any],
+        *,
+        question_text: str,
+        topic: str,
+        difficulty: str,
+        index: int,
+        language: str,
+    ) -> dict[str, Any] | None:
+        raw_answer = item.get("correct_answer", item.get("answer", item.get("answer_index")))
+        if isinstance(raw_answer, bool):
+            answer_index = 0 if raw_answer else 1
+        elif isinstance(raw_answer, int):
+            answer_index = raw_answer
+        else:
+            normalized = str(raw_answer or "").strip().casefold()
+            truthy = {"true", "t", "yes", "صح", "صحيح"}
+            falsy = {"false", "f", "no", "خطأ", "خطاء", "غير صحيح"}
+            if normalized in truthy:
+                answer_index = 0
+            elif normalized in falsy:
+                answer_index = 1
+            else:
+                return None
+        if answer_index not in {0, 1}:
+            return None
+        options = ["صح", "خطأ"] if language == "ar" else ["True", "False"]
+        return {
+            "id": f"llm-{index}",
+            "type": "true_false",
+            "topic": topic,
+            "difficulty": difficulty,
+            "question": question_text,
+            "options": options,
+            "answer_index": answer_index,
+        }
+
+    def _normalize_llm_short_answer(
+        self,
+        item: dict[str, Any],
+        *,
+        question_text: str,
+        topic: str,
+        difficulty: str,
+        index: int,
+    ) -> dict[str, Any] | None:
+        expected = str(
+            item.get("expected_answer")
+            or item.get("correct_answer")
+            or item.get("answer")
+            or ""
+        ).strip()
+        if not expected or self._answer_leaks_in_question(question_text, expected):
+            return None
+        keywords = item.get("keywords")
+        if isinstance(keywords, str):
+            clean_keywords = [part.strip() for part in re.split(r"[,;\n]+", keywords) if part.strip()]
+        elif isinstance(keywords, list):
+            clean_keywords = [str(part).strip() for part in keywords if str(part or "").strip()]
+        else:
+            clean_keywords = self._keywords(expected, topic)
+        return {
+            "id": f"llm-{index}",
+            "type": "short_answer",
+            "topic": topic,
+            "difficulty": difficulty,
+            "question": question_text,
+            "expected_answer": self._trim(expected, max_length=240),
+            "keywords": clean_keywords[:6],
+        }
+
+    def _normalize_llm_matching(
+        self,
+        item: dict[str, Any],
+        *,
+        question_text: str,
+        topic: str,
+        difficulty: str,
+        index: int,
+    ) -> dict[str, Any] | None:
+        pairs = item.get("pairs")
+        if isinstance(pairs, dict):
+            pairs = [{"left": left, "right": right} for left, right in pairs.items()]
+        if not isinstance(pairs, list):
+            answer_map = item.get("answer_map")
+            if isinstance(answer_map, dict):
+                pairs = [{"left": left, "right": right} for left, right in answer_map.items()]
+        clean_pairs = []
+        for pair in pairs or []:
+            if not isinstance(pair, dict):
+                continue
+            left = str(pair.get("left") or pair.get("term") or "").strip()
+            right = str(pair.get("right") or pair.get("match") or pair.get("definition") or "").strip()
+            if left and right:
+                clean_pairs.append({"left": left, "right": right})
+            if len(clean_pairs) == 4:
+                break
+        if len(clean_pairs) < 2:
+            return None
+        return {
+            "id": f"llm-{index}",
+            "type": "matching",
+            "topic": topic,
+            "difficulty": difficulty,
+            "question": question_text,
+            "pairs": clean_pairs,
+            "options": [pair["right"] for pair in clean_pairs],
+            "answer_map": {pair["left"]: pair["right"] for pair in clean_pairs},
+        }
+
+    def _llm_correct_answer(self, item: dict[str, Any], options: list[str]) -> str:
+        raw_index = item.get("answer_index")
+        try:
+            answer_index = int(raw_index)
+        except (TypeError, ValueError):
+            answer_index = -1
+        if 0 <= answer_index < len(options):
+            return str(options[answer_index]).strip()
+        for key in ("correct_choice", "correct_answer", "answer"):
+            candidate = str(item.get(key) or "").strip()
+            if not candidate:
+                continue
+            match = next(
+                (option for option in options if self._normalize_text(option) == self._normalize_text(candidate)),
+                None,
+            )
+            return match or candidate
+        return ""
+
+    def _dedupe_options(self, options: list[str]) -> list[str]:
+        deduped = []
+        seen: set[str] = set()
+        for option in options:
+            normalized = self._normalize_text(option)
+            if not option or normalized in seen:
+                continue
+            deduped.append(option)
+            seen.add(normalized)
+        return deduped
+
+    def _normalize_llm_question_type(self, value: Any, *, fallback: str) -> str:
+        normalized = str(value or fallback).strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "multiple_choice": "mcq",
+            "multiple_choice_question": "mcq",
+            "truefalse": "true_false",
+            "tf": "true_false",
+            "short": "short_answer",
+            "shortanswer": "short_answer",
+            "match": "matching",
+        }
+        return aliases.get(normalized, normalized)
+
+    def _raw_question_texts(self, raw_questions: Any) -> list[str]:
+        if isinstance(raw_questions, dict):
+            raw_questions = [raw_questions]
+        if not isinstance(raw_questions, list):
+            return []
+        return [
+            str(item.get("question") or "").strip()
+            for item in raw_questions
+            if isinstance(item, dict) and str(item.get("question") or "").strip()
+        ]
 
     def _course_name_from_context(self, context_chunks: list[dict[str, Any]]) -> str:
         for chunk in context_chunks:
@@ -722,6 +989,58 @@ class QuizGeneratorAgent:
                 cards.insert(0, {"front": f"{prompt} {topic}", "back": best_chunk})
         return cards
 
+    def _finalize_questions(
+        self,
+        questions: list[dict[str, Any]],
+        *,
+        topic: str,
+        language: str,
+        difficulty: str,
+    ) -> list[dict[str, Any]]:
+        finalized = []
+        for index, question in enumerate(questions, start=1):
+            if not isinstance(question, dict):
+                continue
+            item = dict(question)
+            item.setdefault("id", f"question-{index}")
+            item.setdefault("topic", topic)
+            item.setdefault("difficulty", difficulty)
+            question_type = self._normalize_llm_question_type(item.get("type"), fallback="mcq")
+            item["type"] = question_type if question_type in self.ALLOWED_QUESTION_TYPES else "mcq"
+            concept_seed = item.get("concept") or item.get("expected_answer") or item.get("question") or topic
+            item["concept"] = self._concept_label(concept_seed, topic=topic)
+            item["hint"] = self._clean_hint(item.get("hint"), topic=topic, concept=item["concept"], language=language)
+            item.setdefault("source", "generated")
+
+            if item["type"] in {"mcq", "true_false"}:
+                options = [str(option).strip() for option in item.get("options", []) if str(option or "").strip()]
+                try:
+                    answer_index = int(item.get("answer_index", -1))
+                except (TypeError, ValueError):
+                    answer_index = -1
+                correct = options[answer_index] if 0 <= answer_index < len(options) else ""
+                item["options"] = options
+                item["answer_index"] = answer_index
+                item["choices"] = options
+                if item["type"] == "mcq":
+                    item["correct_choice"] = correct
+                item["answer"] = correct
+                item["correct_answer"] = correct
+            elif item["type"] == "short_answer":
+                expected = str(item.get("expected_answer") or item.get("correct_answer") or item.get("answer") or "").strip()
+                item["expected_answer"] = expected
+                item["answer"] = expected
+                item["correct_answer"] = expected
+                if not item.get("keywords"):
+                    item["keywords"] = self._keywords(expected, topic)
+            elif item["type"] == "matching":
+                answer_map = item.get("answer_map") if isinstance(item.get("answer_map"), dict) else {}
+                item["answer_map"] = answer_map
+                item["answer"] = answer_map
+                item["correct_answer"] = answer_map
+            finalized.append(item)
+        return finalized
+
     def _shuffle_options(
         self,
         correct: str,
@@ -742,7 +1061,14 @@ class QuizGeneratorAgent:
                 break
         fallback_index = 1
         while len(options) < 4:
-            filler = f"Unsupported option {fallback_index}"
+            filler_templates = [
+                "A related idea that the question does not support",
+                "A memorized label without the needed explanation",
+                "An unrelated step from a different process",
+            ]
+            filler = filler_templates[(fallback_index - 1) % len(filler_templates)]
+            if fallback_index > len(filler_templates):
+                filler = f"{filler} ({fallback_index})"
             fallback_index += 1
             if self._normalize_text(filler) in seen:
                 continue
@@ -750,6 +1076,100 @@ class QuizGeneratorAgent:
             seen.add(self._normalize_text(filler))
         rng.shuffle(options)
         return options, options.index(correct)
+
+    def _difficulty_description(self, difficulty: str) -> str:
+        descriptions = {
+            "easy": "test core definitions and direct comprehension with simple wording.",
+            "medium": "test application, relationships, and common misconceptions.",
+            "hard": "test transfer, edge cases, comparisons, and mistake-prone reasoning.",
+        }
+        return descriptions.get(difficulty, descriptions["medium"])
+
+    def _type_instructions(self, question_types: list[str], *, language: str) -> str:
+        del language
+        instructions = {
+            "mcq": (
+                "- MCQ: ask one focused question, provide exactly four plausible choices, "
+                "set answer_index to the correct option, and avoid generic distractors."
+            ),
+            "true_false": (
+                "- true_false: write a supportable claim, provide two options, and set the correct answer."
+            ),
+            "short_answer": (
+                "- short_answer: ask for a one- or two-sentence answer, include expected_answer and keywords."
+            ),
+            "matching": (
+                "- matching: include 2-4 clear pairs and an answer_map. Keep each left/right item concise."
+            ),
+        }
+        return "\n".join(instructions[item] for item in question_types if item in instructions)
+
+    def _grounding_instructions(self, *, has_context: bool) -> str:
+        if has_context:
+            return (
+                "Use only the provided selected-course context. Do not import outside facts or unrelated topics. "
+                "If a requested weak topic is not supported by the context, keep the quiz on the retrieved material. "
+                "Source labels must refer to the provided context."
+            )
+        return (
+            "No retrieved source material is available. Generate from the requested topic only and avoid pretending "
+            "that uploaded notes support the answer."
+        )
+
+    def _format_weak_topics(self, weak_topics: list[str]) -> str:
+        if not weak_topics:
+            return "None."
+        return "\n".join(f"- {topic}" for topic in weak_topics[:8])
+
+    def _normalize_weak_topics(self, weak_topics: list[str] | None) -> list[str]:
+        normalized = []
+        seen: set[str] = set()
+        for item in weak_topics or []:
+            text = self._trim(str(item or "").strip(), max_length=80)
+            key = text.casefold()
+            if not text or key in seen:
+                continue
+            normalized.append(text)
+            seen.add(key)
+            if len(normalized) == 8:
+                break
+        return normalized
+
+    def _concept_label(self, value: Any, *, topic: str) -> str:
+        text = str(value or topic)
+        keywords = self._keywords(text, topic)
+        if not keywords:
+            keywords = self._keywords(topic, "")
+        if not keywords:
+            return self._trim(f"Core {topic} concept", max_length=60)
+        label = " ".join(keywords[:6])
+        words = label.split()
+        if len(words) < 3:
+            topic_words = [word for word in re.findall(r"[\w\u0600-\u06FF]+", topic) if word.casefold() not in {w.casefold() for w in words}]
+            words.extend(topic_words[: 3 - len(words)])
+        return " ".join(words[:6]) or self._trim(topic, max_length=60)
+
+    def _clean_hint(
+        self,
+        value: Any,
+        *,
+        topic: str,
+        concept: str | None = None,
+        language: str = "en",
+    ) -> str:
+        hint = self._trim(str(value or ""), max_length=140)
+        if hint:
+            return hint
+        concept = concept or self._concept_label(topic, topic=topic)
+        if language == "ar":
+            return f"\u0631\u0627\u062c\u0639 \u0627\u0644\u0641\u0643\u0631\u0629 \u0627\u0644\u0623\u0633\u0627\u0633\u064a\u0629 \u0648\u0627\u0631\u0628\u0637\u0647\u0627 \u0628\u0640 {concept}."
+        return f"Focus on the core idea behind {concept}, then connect it to the question."
+
+    def _answer_leaks_in_question(self, question: str, answer: str) -> bool:
+        normalized_answer = self._normalize_text(answer)
+        if len(normalized_answer) < 4:
+            return False
+        return normalized_answer in self._normalize_text(question)
 
     def _clean_topic(self, topic: str) -> str:
         cleaned = re.sub(r"\s+", " ", str(topic or "").strip(" .\u061f?؛:"))

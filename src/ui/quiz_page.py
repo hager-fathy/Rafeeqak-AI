@@ -191,6 +191,7 @@ def render_quiz_page(project_root: Path) -> None:
                         course_id=generation_request["course_id"],
                         topic=generation_request["topic"],
                     ),
+                    weak_topics=_course_weak_topics(course_context(), requested_topic=generation_request["topic"]),
                     course_id=generation_request["course_id"],
                     course_name=generation_request["course_name"],
                     source_name=generation_request.get("source_name"),
@@ -385,6 +386,40 @@ def _record_attempt(
         st.info(t("quiz.synced", language))
     else:
         st.warning(t("quiz.local_only", language, reason=sync_result["reason"]))
+
+
+def _course_weak_topics(context: dict[str, Any], *, requested_topic: str) -> list[str]:
+    active_plan = context.get("active_plan")
+    raw_topics: list[str] = []
+    if isinstance(active_plan, dict):
+        raw_topics.extend(active_plan.get("weak_topics", []) or [])
+    for attempt in list(context.get("quiz_attempts", []) or [])[-8:]:
+        if not isinstance(attempt, dict):
+            continue
+        raw_topics.extend(attempt.get("weak_topics", []) or [])
+        try:
+            score = float(attempt.get("score_percent", 100))
+        except (TypeError, ValueError):
+            score = 100.0
+        topic = str(attempt.get("topic") or "").strip()
+        if topic and score < 70:
+            raw_topics.append(topic)
+
+    topics = []
+    seen: set[str] = set()
+    requested_key = requested_topic.casefold().strip()
+    for item in raw_topics:
+        topic = " ".join(str(item or "").split())
+        key = topic.casefold()
+        if not topic or key in seen:
+            continue
+        seen.add(key)
+        topics.append(topic)
+        if len(topics) == 8:
+            break
+    if requested_topic and requested_key not in seen:
+        topics.append(requested_topic)
+    return topics[:8]
 
 
 def _render_feedback(evaluation: dict[str, Any] | None, language: str) -> None:
@@ -664,6 +699,7 @@ def generate_quiz_from_course_materials(
     course_name: str | None,
     previous_questions: list[str] | None = None,
     avoid_questions: list[str] | None = None,
+    weak_topics: list[str] | None = None,
     source_name: str | None = None,
 ) -> dict[str, Any]:
     indexer.index_all(course_id=course_id, course_name=course_name)
@@ -707,6 +743,7 @@ def generate_quiz_from_course_materials(
         question_types=question_types,
         previous_questions=previous_questions,
         avoid_questions=avoid_questions,
+        weak_topics=weak_topics,
     )
     quiz = quiz_result.get("quiz")
     questions = quiz_result.get("questions") or (quiz.get("questions", []) if isinstance(quiz, dict) else [])

@@ -52,6 +52,8 @@ class ProgressEvaluatorAgent:
                     "is_correct": scored["score"] >= 1.0,
                     "partial_credit": 0 < scored["score"] < 1.0,
                     "score": round(scored["score"], 2),
+                    "hint": question.get("hint", ""),
+                    "concept": question.get("concept", topic),
                     "explanation": question.get("explanation", ""),
                     "source": question.get("source", "generated"),
                 }

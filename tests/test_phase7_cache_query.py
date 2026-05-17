@@ -60,6 +60,29 @@ def test_semantic_cache_rejects_stale_context(tmp_path) -> None:
     assert cache.lookup(message="What is my progress?", language="en", context_fingerprint="new-context") is None
 
 
+def test_semantic_cache_rejects_same_context_from_different_course(tmp_path) -> None:
+    cache = SemanticResponseCache(cache_path=tmp_path / "semantic_cache.json", min_similarity=0.5)
+    cache.store(
+        message="What is my progress?",
+        language="en",
+        intent="database_query",
+        agent="database_query_agent",
+        response="Security progress answer.",
+        payload={},
+        course_id="security-course",
+        context_fingerprint="same-context",
+    )
+
+    hit = cache.lookup(
+        message="What is my progress?",
+        language="en",
+        course_id="ml-course",
+        context_fingerprint="same-context",
+    )
+
+    assert hit is None
+
+
 def test_database_query_agent_answers_progress_and_deadlines() -> None:
     context = {
         "active_plan": _active_plan(),

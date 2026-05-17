@@ -51,6 +51,8 @@ class DuplicateChunkIndexer:
                 source_name="INE Introduction to SOC Course File.pdf",
                 section="page 201",
                 chunk_index=1,
+                course_id="soc",
+                course_name="SOC",
                 score=0.92,
                 text=(
                     "SOC tiers divide security operations responsibilities into levels. "
@@ -61,6 +63,8 @@ class DuplicateChunkIndexer:
                 source_name="INE Introduction to SOC Course File.pdf",
                 section="page 201",
                 chunk_index=1,
+                course_id="soc",
+                course_name="SOC",
                 score=0.91,
                 text=(
                     "SOC tiers divide security operations responsibilities into levels. "
@@ -71,6 +75,8 @@ class DuplicateChunkIndexer:
                 source_name="INE Introduction to SOC Course File.pdf",
                 section="page 5",
                 chunk_index=1,
+                course_id="soc",
+                course_name="SOC",
                 score=0.72,
                 text="A SOC analyst monitors security events and escalates suspicious activity.",
             ),
@@ -102,6 +108,24 @@ class SingleChunkIndexer:
                 text=self.text,
             )
         ]
+
+
+class CapturingCourseRAG:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def answer(self, *args, **kwargs) -> dict:
+        self.calls.append({"args": args, "kwargs": kwargs})
+        return {
+            "ok": True,
+            "status": "answered",
+            "response": "Grounded answer",
+            "question": args[0] if args else "",
+            "citations": [],
+            "matches": [],
+            "stats": {"files": 1, "chunks": 1, "sources": [], "updated_at_utc": None},
+            "generation_mode": "offline_template",
+        }
 
 
 def test_course_material_indexer_extracts_chunks_and_searches(tmp_path) -> None:
@@ -150,6 +174,33 @@ def test_course_material_search_filters_by_course_id(tmp_path) -> None:
     assert matches[0].citation() == "Machine Learning - ml_notes.txt - text/chunk 1"
 
 
+def test_retrieval_only_returns_active_course_chunks_for_shared_terms(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    ml_dir = uploads_dir / "ml-course"
+    sec_dir = uploads_dir / "security-course"
+    ml_dir.mkdir(parents=True)
+    sec_dir.mkdir(parents=True)
+    ml_dir.joinpath("backpropagation_notes.txt").write_text(
+        "Backpropagation uses gradients in neural network training.",
+        encoding="utf-8",
+    )
+    sec_dir.joinpath("soc_tiers.txt").write_text(
+        "SOC tiers use escalation procedures for analyst investigations.",
+        encoding="utf-8",
+    )
+
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    indexer.index_all(course_id="ml-course", course_name="Machine Learning")
+    indexer.index_all(course_id="security-course", course_name="Security")
+
+    matches = indexer.search("uses", course_id="ml-course", min_score=0.01)
+
+    assert matches
+    assert {match.course_id for match in matches} == {"ml-course"}
+    assert all("SOC tiers" not in match.text for match in matches)
+
+
 def test_course_material_indexer_removes_deleted_file_and_chunks(tmp_path) -> None:
     uploads_dir = tmp_path / "uploads"
     vector_store_dir = tmp_path / "vector_store"
@@ -188,8 +239,8 @@ def test_course_rag_agent_answers_with_citations(tmp_path) -> None:
     assert result["ok"] is True
     assert result["status"] == "answered"
     assert "Sources:" in result["response"]
-    assert "- lecture.txt, text, chunk 1" in result["response"]
-    assert result["citations"] == ["lecture.txt, text, chunk 1"]
+    assert "📄 this course | lecture.txt | Page/Chunk: text/chunk 1" in result["response"]
+    assert result["citations"] == ["📄 this course | lecture.txt | Page/Chunk: text/chunk 1"]
 
 
 def test_course_rag_agent_uses_llm_when_available(tmp_path) -> None:
@@ -206,7 +257,7 @@ def test_course_rag_agent_uses_llm_when_available(tmp_path) -> None:
 
     assert result["generation_mode"] == "llm"
     assert result["response"].startswith("LLM answer")
-    assert "- lecture.txt, text, chunk 1" in result["response"]
+    assert "📄 this course | lecture.txt | Page/Chunk: text/chunk 1" in result["response"]
 
 
 def test_course_rag_agent_includes_course_name_in_citations_when_available(tmp_path) -> None:
@@ -227,9 +278,9 @@ def test_course_rag_agent_includes_course_name_in_citations_when_available(tmp_p
     )
 
     assert result["ok"] is True
-    assert result["citations"] == ["Machine Learning, lecture.txt, text, chunk 1"]
-    assert "- Machine Learning, lecture.txt, text, chunk 1" in result["response"]
-    assert result["matches"][0]["citation"] == "Machine Learning, lecture.txt, text, chunk 1"
+    assert result["citations"] == ["📄 Machine Learning | lecture.txt | Page/Chunk: text/chunk 1"]
+    assert "📄 Machine Learning | lecture.txt | Page/Chunk: text/chunk 1" in result["response"]
+    assert result["matches"][0]["citation"] == "📄 Machine Learning | lecture.txt | Page/Chunk: text/chunk 1"
 
 
 def test_course_rag_agent_answers_arabic_questions_in_arabic(tmp_path) -> None:
@@ -265,7 +316,7 @@ def test_course_rag_agent_clarifies_vague_query_without_retrieval(tmp_path) -> N
 
     assert result["ok"] is False
     assert result["status"] == "needs_clarification"
-    assert "What topic would you like me to explain?" in result["response"]
+    assert "What topic would you like me to summarize or explain?" in result["response"]
     assert spy_indexer.index_all_calls == 0
     assert spy_indexer.search_calls == 0
 
@@ -284,6 +335,35 @@ def test_course_rag_agent_clarifies_arabic_vague_query(tmp_path) -> None:
     assert "\u0645\u0645\u0643\u0646 \u062a\u062d\u062f\u062f \u0627\u0644\u0645\u0648\u0636\u0648\u0639" in result["response"]
 
 
+def test_course_rag_arabic_vague_query_suggests_only_active_course_topics(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    ml_dir = uploads_dir / "ml-course"
+    sec_dir = uploads_dir / "security-course"
+    ml_dir.mkdir(parents=True)
+    sec_dir.mkdir(parents=True)
+    ml_dir.joinpath("backpropagation_notes.txt").write_text(
+        "Backpropagation computes gradients for neural network learning.",
+        encoding="utf-8",
+    )
+    sec_dir.joinpath("soc_tiers.txt").write_text(
+        "SOC tiers, threat hunting, and SOC analyst roles are security operations topics.",
+        encoding="utf-8",
+    )
+
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    indexer.index_all(course_id="ml-course", course_name="Machine Learning")
+    indexer.index_all(course_id="security-course", course_name="Security")
+    agent = CourseRAGAgent(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir, llm_client=OfflineLLM())
+
+    result = agent.answer("\u0644\u062e\u0635", language="ar", course_id="ml-course", course_name="Machine Learning")
+
+    assert result["status"] == "needs_clarification"
+    assert "backpropagation notes" in result["response"]
+    assert "SOC" not in result["response"]
+    assert "threat hunting" not in result["response"]
+
+
 def test_course_rag_agent_removes_duplicate_chunks_and_formats_unique_sources(tmp_path) -> None:
     agent = CourseRAGAgent(
         uploads_dir=tmp_path / "uploads",
@@ -299,11 +379,11 @@ def test_course_rag_agent_removes_duplicate_chunks_and_formats_unique_sources(tm
     assert duplicate_indexer.search_calls[0]["course_id"] == "soc"
     assert len(result["matches"]) == 2
     assert result["citations"] == [
-        "SOC, INE Introduction to SOC Course File.pdf, page 201, chunk 1",
-        "SOC, INE Introduction to SOC Course File.pdf, page 5, chunk 1",
+        "📄 SOC | INE Introduction to SOC Course File.pdf | Page/Chunk: page 201",
+        "📄 SOC | INE Introduction to SOC Course File.pdf | Page/Chunk: page 5",
     ]
-    assert result["response"].count("- SOC, INE Introduction to SOC Course File.pdf, page 201, chunk 1") == 1
-    assert result["response"].count("- SOC, INE Introduction to SOC Course File.pdf, page 5, chunk 1") == 1
+    assert result["response"].count("📄 SOC | INE Introduction to SOC Course File.pdf | Page/Chunk: page 201") == 1
+    assert result["response"].count("📄 SOC | INE Introduction to SOC Course File.pdf | Page/Chunk: page 5") == 1
 
 
 def test_course_rag_agent_synthesizes_specific_query_instead_of_dumping_chunks(tmp_path) -> None:
@@ -322,7 +402,7 @@ def test_course_rag_agent_synthesizes_specific_query_instead_of_dumping_chunks(t
     assert "SOC tiers is covered in your course material" in result["response"]
     assert raw_chunk not in result["response"]
     assert "Based on your uploaded materials" not in result["response"]
-    assert "Sources:\n\n- soc_notes.pdf, page 201, chunk 1" in result["response"]
+    assert "Sources:\n\n📄 this course | soc_notes.pdf | Page/Chunk: page 201" in result["response"]
 
 
 def test_supervisor_routes_course_material_questions_to_rag(tmp_path) -> None:
@@ -346,6 +426,30 @@ def test_supervisor_routes_course_material_questions_to_rag(tmp_path) -> None:
     assert result["trace"][-2]["status"] == "completed"
 
 
+def test_course_rag_no_material_in_active_course_does_not_use_other_course(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    sec_dir = uploads_dir / "security-course"
+    sec_dir.mkdir(parents=True)
+    sec_dir.joinpath("soc_tiers.txt").write_text(
+        "SOC tiers and threat hunting belong to the Security course.",
+        encoding="utf-8",
+    )
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    indexer.index_all(course_id="security-course", course_name="Security")
+
+    result = CourseRAGAgent(
+        uploads_dir=uploads_dir,
+        vector_store_dir=vector_store_dir,
+        llm_client=OfflineLLM(),
+    ).answer("Explain SOC tiers", course_id="ml-course", course_name="Machine Learning")
+
+    assert result["status"] == "no_materials"
+    assert result["matches"] == []
+    assert "selected course" in result["response"]
+    assert "SOC tiers" not in result["response"]
+
+
 def test_supervisor_clarifies_exact_vague_course_material_request(tmp_path) -> None:
     supervisor = SupervisorAgent(
         course_rag=CourseRAGAgent(
@@ -360,7 +464,7 @@ def test_supervisor_clarifies_exact_vague_course_material_request(tmp_path) -> N
 
     assert result["agent"] == "course_rag_agent"
     assert result["payload"]["status"] == "needs_clarification"
-    assert "What topic would you like me to explain?" in result["response"]
+    assert "What topic would you like me to summarize or explain?" in result["response"]
     assert result["trace"][-2]["action"] == "asked for a clearer topic before retrieving course-material chunks"
 
 
@@ -374,3 +478,75 @@ def test_supervisor_blocks_course_scoped_agents_when_course_required(tmp_path) -
     assert result["agent"] == "course_scope_validator"
     assert result["payload"]["active_course_required"] is True
     assert result["trace"][-1]["step"] == "validate_course_scope"
+
+
+def test_supervisor_passes_active_course_memory_to_rag(tmp_path) -> None:
+    course_rag = CapturingCourseRAG()
+    supervisor = SupervisorAgent(
+        course_rag=course_rag,
+        semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"),
+    )
+    plan = {
+        "course_name": "Databases",
+        "exam_date": "2026-06-01",
+        "weak_topics": ["Indexes"],
+        "tasks": [
+            {
+                "task_id": "db-1",
+                "date": "2026-05-18",
+                "topic": "Indexes",
+                "phase": "Review",
+                "hours": 2,
+                "completed": False,
+            },
+            {
+                "task_id": "db-2",
+                "date": "2026-05-17",
+                "topic": "Transactions",
+                "phase": "Practice",
+                "hours": 1,
+                "completed": True,
+            },
+        ],
+    }
+
+    result = supervisor.handle_message(
+        "Explain indexes from the lecture notes",
+        context={
+            "active_course_id": "db-course",
+            "active_course_name": "Databases",
+            "active_plan": plan,
+            "uploads": [],
+            "quiz_attempts": [{"topic": "Indexes", "score_percent": 60, "weak_topics": ["B-trees"]}],
+        },
+    )
+
+    assert result["agent"] == "course_rag_agent"
+    memory = course_rag.calls[0]["kwargs"]["memory"]
+    assert "Active course: Databases" in memory
+    assert "Pending tasks: 1" in memory
+    assert "Completed tasks: 1" in memory
+    assert "Weak topics: Indexes, B-trees" in memory
+
+
+def test_supervisor_trace_includes_retrieved_chunk_course_ids(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    course_dir = uploads_dir / "ml-course"
+    course_dir.mkdir(parents=True)
+    course_dir.joinpath("lecture.txt").write_text(
+        "Gradient descent updates model weights.",
+        encoding="utf-8",
+    )
+
+    supervisor = SupervisorAgent(
+        course_rag=CourseRAGAgent(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir, llm_client=OfflineLLM()),
+        semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"),
+    )
+    result = supervisor.handle_message(
+        "Explain gradient descent from notes",
+        context={"active_course_id": "ml-course", "active_course_name": "Machine Learning", "uploads": []},
+    )
+
+    rag_step = next(step for step in result["trace"] if step["agent"] == "CourseRAGAgent")
+    assert rag_step["details"]["retrieved_chunk_course_ids"] == ["ml-course"]

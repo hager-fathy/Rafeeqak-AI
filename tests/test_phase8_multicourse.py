@@ -58,6 +58,20 @@ def test_multi_course_state_is_separated() -> None:
     assert course_context()["chat_history"][0]["content"] == "physics chat"
 
 
+def test_switching_courses_does_not_leak_chat_history() -> None:
+    init_state()
+    ml = add_course("Machine Learning")
+    update_active_course_bucket(chat_history=[{"role": "user", "content": "ml chat only"}])
+    security = add_course("Security")
+    update_active_course_bucket(chat_history=[{"role": "user", "content": "security chat only"}])
+
+    set_active_course(ml["id"])
+    assert course_context()["chat_history"] == [{"role": "user", "content": "ml chat only"}]
+
+    set_active_course(security["id"])
+    assert course_context()["chat_history"] == [{"role": "user", "content": "security chat only"}]
+
+
 def test_course_rename_and_delete_update_active_state() -> None:
     init_state()
     first = add_course("Machine Learning")
@@ -195,3 +209,23 @@ def test_course_material_indexer_can_rename_and_remove_course(tmp_path) -> None:
     assert removal["removed_chunks"] == 1
     assert indexer.search("gradient", course_id="course-a") == []
     assert not material.exists()
+
+
+def test_sources_panel_stats_only_include_active_course_sources(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    ml_dir = uploads_dir / "ml-course"
+    sec_dir = uploads_dir / "security-course"
+    ml_dir.mkdir(parents=True)
+    sec_dir.mkdir(parents=True)
+    ml_dir.joinpath("ml_notes.txt").write_text("Gradient descent and backpropagation.", encoding="utf-8")
+    sec_dir.joinpath("soc_notes.txt").write_text("SOC tiers and threat hunting.", encoding="utf-8")
+
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    indexer.index_all(course_id="ml-course", course_name="Machine Learning")
+    indexer.index_all(course_id="security-course", course_name="Security")
+
+    stats = indexer.stats(course_id="ml-course")
+
+    assert stats["sources"] == ["ml_notes.txt"]
+    assert "soc_notes.txt" not in stats["sources"]

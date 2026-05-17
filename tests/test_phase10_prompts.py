@@ -5,7 +5,7 @@ from src.agents.memory_agent import MemoryAgent
 from src.agents.quiz_generator import QuizGeneratorAgent
 from src.agents.reminder_agent import ReminderAgent
 from src.agents.study_planner import StudyPlannerAgent
-from src.prompts import available_templates, render_prompt, required_variables
+from src.prompts import available_templates, build_system_prompt, render_prompt, required_variables
 from src.retrieval import CourseMaterialIndexer
 
 
@@ -138,9 +138,12 @@ def test_required_phase10_templates_render() -> None:
         "next_steps": "Practice one example.",
         "topic": "Backpropagation",
         "difficulty": "medium",
+        "difficulty_description": "test application and misconceptions",
         "number_of_questions": 3,
         "question_types": "mcq",
+        "type_instructions": "- MCQ: exactly four choices.",
         "avoid_questions": "None.",
+        "grounding_instructions": "Use only the provided selected-course context.",
         "score": "70%",
         "weak_topics": "gradients",
         "recommendations": "practice chain rule",
@@ -182,6 +185,27 @@ def test_rag_agent_uses_rag_prompt_template(tmp_path) -> None:
     assert "Retrieved context" in llm.calls[0]["user_prompt"]
     assert "Available source labels" in llm.calls[0]["user_prompt"]
     assert "Machine Learning" in llm.calls[0]["user_prompt"]
+    assert "Rafeeqak" in llm.calls[0]["system_prompt"]
+    assert "Course ID   : ml" in llm.calls[0]["system_prompt"]
+    assert "SOURCE MATERIAL RULES" in llm.calls[0]["system_prompt"]
+    assert "📄 Machine Learning | lecture.txt | Page/Chunk: text/chunk 1" in llm.calls[0]["system_prompt"]
+
+
+def test_chatbot_system_prompt_renders_runtime_context() -> None:
+    prompt = build_system_prompt(
+        course_name="Databases",
+        course_id="db-1",
+        language="English",
+        memory="Pending tasks: 2\nWeak topics: Indexes",
+        context="[1] 📄 Databases | notes.pdf | Page/Chunk: page 4\nB-tree indexes balance search paths.",
+    )
+
+    assert "Course name : Databases" in prompt
+    assert "Course ID   : db-1" in prompt
+    assert "Pending tasks: 2" in prompt
+    assert "B-tree indexes balance search paths." in prompt
+    assert "{file_name}" in prompt
+    assert "{{" not in prompt
 
 
 def test_quiz_and_study_planner_use_prompt_templates() -> None:
