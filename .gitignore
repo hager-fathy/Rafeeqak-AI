@@ -7,3 +7,4 @@ data/uploads/
 data/vector_store/
 data/cache/
 data/user_state/
+tests/conftest.py
