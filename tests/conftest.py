@@ -1,4 +1,5 @@
 import os
 
 
-os.environ["GEMINI_API_KEY"] = "your_gemini_api_key_here"
+os.environ["GEMINI_API_KEY"] = "AIzaSyAyLMA0yMobQb95cbq5KZ2MaheLV7HQ9RU"
+os.environ["GOOGLE_API_KEY"] = "AIzaSyAyLMA0yMobQb95cbq5KZ2MaheLV7HQ9RU"
