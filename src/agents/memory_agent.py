@@ -6,6 +6,8 @@ from typing import Any
 
 from src.memory import MemoryRepositoryError, SupabaseMemoryRepository
 from src.localization import normalize_language
+from src.prompts import render_prompt
+from src.tools.llm_client import LLMClient
 
 
 class MemoryAgent:
@@ -66,8 +68,9 @@ class MemoryAgent:
         "مش فاهم",
     }
 
-    def __init__(self) -> None:
+    def __init__(self, *, llm_client: LLMClient | None = None) -> None:
         self.repository = SupabaseMemoryRepository()
+        self.llm_client = llm_client or LLMClient()
         self._student_id: str | None = None
 
     def status(self) -> dict[str, Any]:
@@ -214,9 +217,43 @@ class MemoryAgent:
             for item in messages
             if isinstance(item, dict) and str(item.get("content", "")).strip()
         ]
-        main_topics = self._main_chat_topics(clean_messages, language=language)
-        weaknesses = self._chat_weaknesses(clean_messages, main_topics=main_topics)
-        next_steps = self._chat_next_steps(main_topics=main_topics, weaknesses=weaknesses, language=language)
+        local_main_topics = self._main_chat_topics(clean_messages, language=language)
+        local_weaknesses = self._chat_weaknesses(clean_messages, main_topics=local_main_topics)
+        local_next_steps = self._chat_next_steps(
+            main_topics=local_main_topics,
+            weaknesses=local_weaknesses,
+            language=language,
+        )
+        llm_summary = self._generate_chat_summary_with_llm(
+            course_name=course_name,
+            messages=clean_messages,
+            main_topics=local_main_topics,
+            weaknesses=local_weaknesses,
+            next_steps=local_next_steps,
+            language=language,
+        )
+        if llm_summary:
+            main_topics = self._summary_items(llm_summary.get("main_topics"), fallback=local_main_topics, limit=5)
+            weaknesses = self._summary_items(llm_summary.get("weaknesses"), fallback=local_weaknesses, limit=5)
+            next_steps = self._summary_items(llm_summary.get("next_steps"), fallback=local_next_steps, limit=3)
+            summary_text = self._clean_summary_text(llm_summary.get("summary"))
+            summary_source = "llm_session_summary"
+        else:
+            main_topics = local_main_topics
+            weaknesses = local_weaknesses
+            next_steps = local_next_steps
+            summary_text = ""
+            summary_source = "local_session"
+
+        if not summary_text:
+            summary_text = self._chat_summary_text(
+                course_name=course_name,
+                main_topics=main_topics,
+                weaknesses=weaknesses,
+                next_steps=next_steps,
+                language=language,
+            )
+
         created_at = datetime.utcnow().isoformat(timespec="seconds")
         summary = {
             "summary_id": "active_session",
@@ -227,16 +264,10 @@ class MemoryAgent:
             "main_topics": main_topics,
             "weaknesses": weaknesses,
             "next_steps": next_steps,
-            "summary": self._chat_summary_text(
-                course_name=course_name,
-                main_topics=main_topics,
-                weaknesses=weaknesses,
-                next_steps=next_steps,
-                language=language,
-            ),
+            "summary": summary_text,
             "created_at_utc": created_at,
             "updated_at_utc": created_at,
-            "source": "local_session",
+            "source": summary_source,
         }
 
         sync_result = {"ok": False, "reason": "Cloud sync skipped."}
@@ -439,6 +470,84 @@ class MemoryAgent:
             f"Review {first} with a short summary and one worked example.",
             f"Create a short quiz on {first} to check understanding.",
         ]
+
+    def _generate_chat_summary_with_llm(
+        self,
+        *,
+        course_name: str | None,
+        messages: list[dict[str, str]],
+        main_topics: list[str],
+        weaknesses: list[str],
+        next_steps: list[str],
+        language: str,
+    ) -> dict[str, Any] | None:
+        if not self.llm_client.is_available or not messages:
+            return None
+
+        prompt = render_prompt(
+            "chat_session_summary",
+            course_name=course_name or ("this course" if language != "ar" else "\u0647\u0630\u0627 \u0627\u0644\u0645\u0642\u0631\u0631"),
+            messages=self._messages_for_prompt(messages),
+            main_topics=self._format_summary_items(main_topics),
+            weaknesses=self._format_summary_items(weaknesses),
+            next_steps=self._format_summary_items(next_steps),
+            language="Arabic" if language == "ar" else "English",
+        )
+        try:
+            payload = self.llm_client.generate_json(
+                system_prompt=prompt.system,
+                user_prompt=prompt.user,
+                temperature=0.2,
+                max_tokens=800,
+            )
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if not any(payload.get(key) for key in ("main_topics", "weaknesses", "next_steps", "summary")):
+            return None
+        return payload
+
+    def _messages_for_prompt(self, messages: list[dict[str, str]], *, limit: int = 12) -> str:
+        lines = []
+        for index, item in enumerate(messages[-limit:], start=1):
+            role = item.get("role") or "message"
+            content = self._trim_text(item.get("content", ""), max_length=500)
+            lines.append(f"{index}. {role}: {content}")
+        return "\n".join(lines) if lines else "No messages."
+
+    def _format_summary_items(self, items: list[str]) -> str:
+        return "\n".join(f"- {item}" for item in items) if items else "None."
+
+    def _summary_items(self, value: Any, *, fallback: list[str], limit: int) -> list[str]:
+        if isinstance(value, str):
+            raw_items = re.split(r"[,;\n]+", value)
+        elif isinstance(value, (list, tuple, set)):
+            raw_items = list(value)
+        else:
+            raw_items = []
+
+        items = []
+        seen: set[str] = set()
+        for item in raw_items:
+            text = " ".join(str(item or "").strip(" -").split())
+            normalized = text.casefold()
+            if not text or normalized in seen:
+                continue
+            items.append(self._trim_text(text, max_length=120))
+            seen.add(normalized)
+            if len(items) == limit:
+                break
+        return items or fallback[:limit]
+
+    def _clean_summary_text(self, value: Any) -> str:
+        return self._trim_text(value, max_length=700)
+
+    def _trim_text(self, value: Any, *, max_length: int) -> str:
+        compact = " ".join(str(value or "").split())
+        if len(compact) <= max_length:
+            return compact
+        return f"{compact[:max_length].rsplit(' ', 1)[0].rstrip()}..."
 
     def _chat_summary_text(
         self,

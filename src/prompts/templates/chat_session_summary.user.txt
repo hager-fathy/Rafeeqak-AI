@@ -1,0 +1,16 @@
+Course: {{course_name}}
+Language: {{language}}
+
+Conversation messages:
+{{messages}}
+
+Initial topic signals:
+{{main_topics}}
+
+Initial weakness signals:
+{{weaknesses}}
+
+Initial next-step ideas:
+{{next_steps}}
+
+Create a concise session memory. Preserve useful weak-topic signals and suggest next actions the student can actually do.

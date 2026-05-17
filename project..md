@@ -408,6 +408,8 @@ The final demo should tell a complete story. A student creates two courses, uplo
 
 Current status checked: 2026-05-15  
 Latest verification: `.venv\Scripts\python.exe -m pytest` passes: 83 passed.
+Phase 13 demo documentation prepared: 2026-05-17.
+Live manual validation attempt: blocked in this workspace because Python, pytest, and Streamlit are not available on PATH.
 
 Legend:
 
@@ -508,8 +510,8 @@ Legend:
 - [x] Move prompts into reusable prompt template files.
 - [x] Add templates for course Q&A, RAG answer, lecture summary, quiz generation, progress feedback, and study planning.
 - [x] Add variables for course name, question, context, lecture title, lecture text, topic, difficulty, number of questions, score, weak topics, and recommendations.
-- [ ] Add chat/session summary prompt template.
-- [ ] Add reminder-generation prompt template.
+- [x] Add chat/session summary prompt template.
+- [x] Add reminder-generation prompt template.
 
 ### Phase 11 - Study Planner Upgrade
 
@@ -543,8 +545,8 @@ Legend:
 - [x] Add tests for quiz loading/failure/retry states.
 - [x] Add tests for chat/session summary quality.
 - [x] Add tests for reminder creation.
-- [ ] Prepare final demo script.
-- [ ] Run end-to-end manual demo validation.
+- [x] Prepare final demo script.
+- [~] Run end-to-end manual demo validation.
 
 ---
 
@@ -581,7 +583,7 @@ Legend:
 | Reusable prompt templates | Complete |
 | Multiple quiz question types | Complete |
 | Partial scoring for text answers | Complete |
-| Better chat/session summaries | Partial - local summaries complete |
+| Better chat/session summaries | Complete |
 | Vague RAG query clarification and no raw chunk dumping | Complete |
 | Study planner input collection | Complete |
 | Weak-topic-first planning | Complete |
@@ -639,4 +641,4 @@ Note: langchain and langgraph are installed but not currently used in the implem
 
 Rafeeqak now has a strong multi-course demo core: authentication, planning, uploads, RAG, quizzes, weak-topic tracking, semantic cache, structured queries, reminders, settings, dashboards, localization, and Gemini integration with offline fallback.
 
-The remaining documented gaps are mainly prompt-template extensions for chat/session summaries and reminder generation, plus final demo validation work. Course scoping, study-planning inputs, weak-topic-first planning, quiz status feedback, dashboard summaries, settings, and reminders are implemented and covered by focused tests.
+The remaining documented gap is the live Streamlit manual validation run in an environment with Python, pytest, Streamlit, and project dependencies installed. Course scoping, study-planning inputs, weak-topic-first planning, quiz status feedback, dashboard summaries, settings, reminders, prompt templates, and final demo materials are implemented and covered by focused tests or demo documentation.

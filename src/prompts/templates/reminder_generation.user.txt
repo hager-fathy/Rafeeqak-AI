@@ -1,0 +1,13 @@
+Course: {{course_name}}
+Language: {{language}}
+
+Tasks:
+{{tasks}}
+
+Deadlines:
+{{deadlines}}
+
+Weak topics:
+{{weak_topics}}
+
+Generate actionable reminders. Prefer upcoming tasks, missed tasks, checkpoint quizzes, weak-topic practice, and deadlines. Avoid duplicate reminders.
