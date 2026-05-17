@@ -1,6 +1,6 @@
 # AI Explanation
 
-This file explains what AI model integration the Smart Study Planner uses, how to configure it, where the prompt templates live, how the app falls back when AI is unavailable, and which code paths use the model.
+This file explains what AI integration the Smart Study Planner currently uses, where the AI is connected in code, how it is configured, which parts are template-based fallbacks, and what is active versus only prepared for future use.
 
 ## What The App Uses
 
@@ -10,48 +10,60 @@ The app uses a shared LLM wrapper:
 src/tools/llm_client.py
 ```
 
-The wrapper supports:
+Supported runtime modes:
 
-| Provider | Environment variable | Default model |
+| Mode | Configuration | Behavior |
 |---|---|---|
-| Gemini | `GEMINI_API_KEY` | `gemini-3.1-flash-lite-preview` |
-| Offline fallback | no key needed | Python templates/rules |
+| Gemini mode | `GEMINI_API_KEY` configured and SDK installed | Active LLM calls for selected features |
+| Offline fallback | no valid key, SDK missing, or invalid model output | Deterministic Python logic and templates |
 
-If `GEMINI_API_KEY` is configured, the app can use Gemini. If Gemini is missing, unavailable, or returns invalid output, the app still works with deterministic offline logic.
+Current provider settings:
+
+| Provider | Environment variable | Default model source |
+|---|---|---|
+| Gemini | `GEMINI_API_KEY` | `DEFAULT_GEMINI_MODEL` from `src/config.py`, overridable with `GEMINI_MODEL` |
+
+If Gemini is unavailable, the app still works for demo and testing because planner, RAG, and quiz flows have fallback behavior.
 
 ## How To Use Gemini
 
 1. Open the `.env` file in the project root.
-2. Add your Gemini key:
+2. Add your Gemini settings:
 
 ```env
 GEMINI_API_KEY=your_real_gemini_key
-GEMINI_MODEL=gemini-3.1-flash-lite-preview
+GEMINI_MODEL=your_preferred_model
 ```
 
 3. Install dependencies:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 4. Run the app:
 
 ```powershell
-.\.venv\Scripts\streamlit.exe run app.py
+streamlit run app.py
 ```
 
 ## Why The App Uses AI
 
-The AI model is used to make the study assistant less fixed and more personalized.
+The project uses AI to improve adaptability and answer quality where static logic alone would feel too rigid.
 
 | Feature | Why AI helps |
 |---|---|
-| Study Plan | Creates more personalized daily tasks from course name, difficulty, exam deadline, weak topics, progress, and daily hours. |
-| Course RAG Chat | Reads retrieved chunks from uploaded course materials and writes a clearer answer with sources. |
-| Quiz Generator | Creates custom MCQs and flashcards from the topic and uploaded course context. |
+| Study Planning | Produces more personalized daily task sequences from difficulty, exam date, weak topics, lecture count, finish period, and progress. |
+| Course RAG Chat | Turns retrieved course chunks into cleaner, grounded answers with source citations. |
+| Quiz Generation | Produces custom questions and flashcards from topic and course-material context. |
 
-The app keeps offline fallback logic because demos and tests should work even without an API key or internet connection.
+The project intentionally keeps offline fallback logic so the system remains stable during:
+
+- missing API key situations
+- test runs
+- network issues
+- invalid model output
+- demo environments without cloud access
 
 ## Main AI Client Code
 
@@ -61,19 +73,21 @@ File:
 src/tools/llm_client.py
 ```
 
-Provider settings:
+Main settings flow:
 
 ```python
-def get_llm_settings() -> LLMSettings:
+def get_llm_settings(*, env_path=None, override_env=False) -> LLMSettings:
+    load_project_env(env_path=env_path, override=override_env)
     gemini_key = os.getenv("GEMINI_API_KEY")
+    gemini_model = (os.getenv("GEMINI_MODEL") or "").strip() or DEFAULT_GEMINI_MODEL
     return LLMSettings(
         provider="gemini",
         api_key=gemini_key,
-        model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
+        model=gemini_model,
     )
 ```
 
-Gemini call:
+Gemini text call:
 
 ```python
 response = self.client.models.generate_content(
@@ -90,17 +104,17 @@ response = self.client.models.generate_content(
 JSON helper:
 
 ```python
-payload = llm_client.generate_json(
-    system_prompt=prompt.system,
-    user_prompt=prompt.user,
-)
+payload = self.generate_text(...)
+match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+parsed = json.loads(match.group(0))
 ```
 
-The JSON helper extracts and validates a JSON object from the model response. Agents still validate the returned structure before using it.
+Important note:
+
+- the wrapper is intentionally small
+- each agent still validates model output before trusting it
 
 ## Prompt Template System
-
-Phase 10 moved prompts out of hardcoded agent strings into reusable template files.
 
 Prompt registry:
 
@@ -121,24 +135,20 @@ Available templates:
 | Course Q&A | `course_question.system.txt`, `course_question.user.txt` | `course_name`, `question`, `language` |
 | RAG answer | `rag_answer.system.txt`, `rag_answer.user.txt` | `course_name`, `question`, `context`, `citations`, `language` |
 | Lecture summary | `lecture_summary.system.txt`, `lecture_summary.user.txt` | `course_name`, `lecture_title`, `lecture_text`, `language` |
-| Quiz generation | `quiz_generation.system.txt`, `quiz_generation.user.txt` | `course_name`, `topic`, `difficulty`, `number_of_questions`, `question_types`, `context`, `language` |
+| Quiz generation | `quiz_generation.system.txt`, `quiz_generation.user.txt` | `course_name`, `topic`, `difficulty`, `number_of_questions`, `question_types`, `context`, `avoid_questions`, `language` |
 | Progress feedback | `progress_feedback.system.txt`, `progress_feedback.user.txt` | `course_name`, `score`, `weak_topics`, `recommendations`, `language` |
-| Study planning | `study_planning.system.txt`, `study_planning.user.txt` | `course_name`, `difficulty`, `exam_deadline`, `daily_hours`, `progress`, `weak_topics`, `language` |
+| Study planning | `study_planning.system.txt`, `study_planning.user.txt` | `course_name`, `difficulty`, `exam_deadline`, `daily_hours`, `lecture_count`, `finish_period`, `progress`, `weak_topics`, `language` |
 
-Prompt rendering example:
+Important distinction:
 
-```python
-prompt = render_prompt(
-    "rag_answer",
-    course_name=course_name,
-    question=question,
-    context=joined_sources,
-    citations=citation_labels,
-    language=response_language,
-)
-```
-
-The registry uses `{{variable}}` placeholders. This avoids conflicts with JSON examples inside prompt files.
+- active runtime templates:
+  - `rag_answer`
+  - `quiz_generation`
+  - `study_planning`
+- prepared but not currently wired into a live page flow:
+  - `course_question`
+  - `lecture_summary`
+  - `progress_feedback`
 
 ## Where AI Is Used
 
@@ -150,29 +160,33 @@ File:
 src/agents/study_planner.py
 ```
 
-Function:
+Main LLM path:
 
 ```python
 _generate_tasks_with_llm(...)
 ```
 
-What it does:
+What it sends:
 
-- Renders the `study_planning` prompt template.
-- Sends course name, difficulty, exam deadline, daily hours, progress, weak topics, language, and planning context.
-- Requests JSON with daily tasks.
-- Validates task count and task fields.
-- Falls back to the offline planner if the LLM is unavailable or returns invalid data.
+- course name
+- difficulty
+- exam deadline
+- daily hours
+- lecture count
+- finish period
+- weak topics
+- progress summary
+- response language
 
-Important call shape:
+What it expects:
 
-```python
-prompt = render_prompt("study_planning", ...)
-payload = self.llm_client.generate_json(
-    system_prompt=prompt.system,
-    user_prompt=prompt.user,
-)
-```
+- JSON with a `tasks` list
+- one task per planning day
+- each task containing topic, phase, hours, task text, and checkpoint state
+
+Fallback if LLM is unavailable or invalid:
+
+- `_build_offline_tasks(...)`
 
 ### 2. Course RAG Chat
 
@@ -182,23 +196,28 @@ File:
 src/agents/course_rag.py
 ```
 
-Function:
+Main LLM path:
 
 ```python
 _compose_llm_answer(...)
 ```
 
-What it does:
+What it sends:
 
-- Retrieves relevant text chunks from uploaded course materials.
-- Renders the `rag_answer` prompt template.
-- Sends only retrieved chunks, citation labels, course name, and the student question to the LLM.
-- Tells the model to answer only from uploaded material.
-- Includes sources in the final answer.
+- student question
+- course name
+- retrieved chunk text
+- citation labels
+- response language
 
-Why this matters:
+What it expects:
 
-The LLM should not invent course content. It should answer from the uploaded files only.
+- a grounded answer based only on retrieved material
+
+What happens without Gemini:
+
+- the agent uses `_compose_offline_answer(...)`
+- the answer still includes sources and avoids raw chunk dumping when possible
 
 ### 3. Quiz Generator
 
@@ -208,72 +227,111 @@ File:
 src/agents/quiz_generator.py
 ```
 
-Function:
+Main LLM path:
 
 ```python
 _generate_with_llm(...)
 ```
 
-What it does:
+What it sends:
 
-- Renders the `quiz_generation` prompt template.
-- Sends course name, topic, difficulty, question count, question type, language, and retrieved course context.
-- Requests structured JSON with MCQs and flashcards.
-- Validates every question before using it.
-- Falls back to offline quiz templates if the LLM output is invalid.
+- course name
+- topic
+- difficulty
+- number of questions
+- question types
+- retrieved context
+- previous questions to avoid
+- response language
 
-Expected JSON shape:
+What it expects:
 
-```json
-{
-  "questions": [
-    {
-      "question": "Which rule is central to backpropagation?",
-      "options": ["Chain rule", "Bayes rule", "Sorting rule", "Voting rule"],
-      "answer_index": 0,
-      "explanation": "Backpropagation applies the chain rule through layers.",
-      "source": "uploaded notes"
-    }
-  ],
-  "flashcards": [
-    {
-      "front": "Backpropagation",
-      "back": "Computes gradients through model layers."
-    }
-  ]
-}
+- structured JSON with `questions`
+- optional `flashcards`
+
+Important runtime note:
+
+- the LLM path is only used when question types normalize to `["mcq"]`
+- mixed quiz-type generation falls back to deterministic Python generation
+
+## How AI Connects To Retrieval
+
+The LLM does not operate alone. It is layered on top of local retrieval.
+
+Retrieval files:
+
+```text
+src/retrieval/course_materials.py
+src/agents/course_rag.py
+src/ui/upload_page.py
 ```
 
-## Templates Prepared For Future AI Use
+Flow:
 
-Some templates are already present even if the current UI does not yet expose a dedicated LLM feature for them:
+1. The user uploads course files.
+2. Files are extracted and chunked.
+3. Chunks are indexed into a local sparse-vector store.
+4. RAG and quiz generation retrieve relevant chunks.
+5. The LLM receives only the retrieved context, not the whole repository.
 
-- `course_question`
-- `lecture_summary`
-- `progress_feedback`
+This keeps the AI behavior course-scoped and grounded.
 
-They are ready for future Phase 11+ agent upgrades.
+## How AI Connects To Agent Architecture
+
+Supervisor file:
+
+```text
+src/agents/supervisor.py
+```
+
+Related routing files:
+
+```text
+src/agents/input_router.py
+src/agents/safety_agent.py
+```
+
+The AI-related features do not run directly from the UI. The app flow is:
+
+1. User sends a message or action through the UI.
+2. `SupervisorAgent` runs safety and routing.
+3. The selected specialist agent decides whether to use Gemini or fallback logic.
+4. The response returns with structured payload data.
+
+This means AI is part of a larger agent system, not a single direct chatbot call.
 
 ## Fallback Behavior
 
-The app is designed to avoid breaking when the LLM is unavailable.
+The project is intentionally resilient when the LLM is unavailable.
 
 If Gemini fails:
 
-- Study plan uses Python planner logic.
-- RAG chat uses retrieved text snippets directly.
-- Quiz generator uses local quiz templates.
+- Study planner uses offline adaptive planner logic.
+- RAG chat uses offline grounded answer synthesis.
+- Quiz generator uses deterministic local templates and context-aware heuristics.
 
 Common generation modes:
 
 | Mode | Meaning |
 |---|---|
-| `llm` | Gemini generated the result. |
-| `offline_template` | The app used local Python logic instead. |
+| `llm` | Gemini produced the final structured output |
+| `offline_template` | local deterministic logic produced the result |
+| `clarification` | the system asked for a clearer query before retrieval |
+
+## What Is Not Fully AI-Driven
+
+Some important project behaviors are still heuristic by design:
+
+- `InputRouterAgent` is keyword-based
+- `SafetyAgent` is blacklist-based
+- semantic cache is sparse-token based
+- retrieval embeddings are local sparse lexical vectors, not neural embeddings
+
+This is still acceptable for the course project, but it should be presented honestly as a hybrid AI system, not a fully model-driven autonomous architecture.
 
 ## Testing
 
-AI and prompt behavior is covered by tests:
+Relevant AI and AI-adjacent tests:
 
 ```text
 tests/test_llm_client.py
@@ -281,23 +339,24 @@ tests/test_phase10_prompts.py
 tests/test_phase4_agents.py
 tests/test_phase5_rag.py
 tests/test_phase6_quiz.py
+tests/test_phase7_cache_query.py
 ```
 
 Latest verified full test result:
 
 ```text
-51 passed
+134 passed
 ```
 
 ## Dependencies
 
-The Gemini SDK dependency is in:
+Gemini SDK dependency is listed in:
 
 ```text
 requirements.txt
 ```
 
-Dependency:
+Expected package:
 
 ```text
 google-genai>=1.0.0
@@ -305,4 +364,10 @@ google-genai>=1.0.0
 
 ## Short Summary
 
-The app uses Gemini through `GEMINI_API_KEY` and `GEMINI_MODEL`. AI is used in study planning, course-material answers, and quiz generation. Prompts now live in reusable template files under `src/prompts/templates`, rendered through `src/prompts/registry.py`. The app keeps deterministic offline fallback logic so it remains stable during tests, demos, missing API-key situations, or temporary AI failures.
+The app uses Gemini through `GEMINI_API_KEY` and optional `GEMINI_MODEL`. Active LLM-backed features are:
+
+- study planning
+- course-material RAG answers
+- quiz generation
+
+Prompts live in reusable template files under `src/prompts/templates` and are rendered through `src/prompts/registry.py`. The app remains stable without AI because all major LLM-backed features have deterministic fallback behavior.

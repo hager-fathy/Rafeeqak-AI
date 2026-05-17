@@ -2,7 +2,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.auth import AuthService, rerun_after_auth_state_change
+from src.auth import AuthService, build_local_demo_user, rerun_after_auth_state_change
 from src.localization import t
 from src.tools.state import get_selected_language, set_authenticated_user
 from src.ui.theme import render_page_hero
@@ -22,7 +22,31 @@ def render_login_page(project_root: Path) -> None:
 
     auth_service = AuthService()
     if not auth_service.is_available:
-        st.error(t("auth.not_configured", language, reason=auth_service.unavailability_reason))
+        st.info(t("auth.demo_mode_info", language, reason=auth_service.unavailability_reason))
+        center_col, form_col, right_col = st.columns([1, 1.4, 1], gap="small", vertical_alignment="center")
+        with form_col:
+            with st.container(border=True):
+                st.markdown(f"#### {t('auth.demo_mode_title', language)}")
+                with st.form("demo_login_form"):
+                    full_name = st.text_input(
+                        t("signup.full_name", language),
+                        placeholder=t("signup.full_name_placeholder", language),
+                    )
+                    email = st.text_input(
+                        t("login.email", language),
+                        value="demo@example.com",
+                        placeholder=t("login.email_placeholder", language),
+                    )
+                    submit = st.form_submit_button(
+                        t("auth.demo_mode_continue", language),
+                        type="primary",
+                        use_container_width=True,
+                    )
+                if submit:
+                    user = build_local_demo_user(email=email, full_name=full_name)
+                    set_authenticated_user(user=user, access_token=None, refresh_token=None)
+                    st.success(t("auth.demo_mode_success", language))
+                    rerun_after_auth_state_change()
         return
 
     center_col, form_col, right_col = st.columns([1, 1.4, 1], gap="small", vertical_alignment="center")

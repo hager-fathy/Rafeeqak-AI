@@ -2,24 +2,38 @@
 
 ## 1. Executive Summary
 
-The Smart Study Planner Chatbot is now implemented through **Phase 10** of the project roadmap. The system has evolved from a basic Streamlit scaffold into a multilingual, multi-course, agentic study assistant with authentication, course management, local workspace persistence, study planning, persistent memory, course-material retrieval, quiz generation, answer evaluation, semantic caching, structured progress queries, Arabic localization, and reusable prompt templates.
+The Smart Study Planner Chatbot is now implemented through **Phase 12** of the roadmap. The system has evolved into a multilingual, multi-course, agent-based study assistant with:
 
-The current implementation supports a complete learning workflow:
+- authentication with Supabase or local demo fallback
+- per-user local workspace persistence
+- multi-course separation
+- adaptive study planning
+- course-material RAG
+- quiz generation and evaluation
+- semantic caching
+- structured progress/deadline/score querying
+- reminders
+- dashboard analytics
+- settings persistence
+- English/Arabic localization with RTL support
+- reusable prompt templates for LLM-backed flows
 
-1. A student signs in with Supabase Auth.
-2. The app restores that student's local workspace by email.
+The current student workflow is:
+
+1. The student signs in with Supabase Auth or enters local demo mode.
+2. The app restores the student workspace by email when available.
 3. The student creates, selects, renames, or deletes courses.
-4. The student creates personalized study plans per course.
+4. The student generates course-scoped study plans.
 5. The student uploads course materials per course.
-6. The assistant retrieves relevant content from uploaded notes.
-7. The assistant answers course-material questions with citations.
-8. The assistant generates quizzes and flashcards.
-9. The app evaluates quiz answers and tracks weak topics.
-10. The student can ask structured questions about progress, deadlines, scores, and weak areas.
-11. Repeated questions can be answered from a semantic cache when the learning context has not changed.
+6. The assistant retrieves relevant notes and answers with citations.
+7. The assistant generates quizzes and flashcards.
+8. The app evaluates answers and tracks weak topics.
+9. The planner uses weak topics and delayed tasks to adapt future study plans.
+10. The reminder system creates study, quiz, missed-task, and deadline reminders.
+11. The dashboard shows progress, quiz trends, weak topics, uploads, and reminders.
 12. The student can switch between English and Arabic with RTL layout support.
 
-Phases 1 through 10 are complete. The remaining roadmap work is now mainly Phase 11+ enhancements such as planner upgrades, dashboard analytics, settings, and final demo preparation.
+Phases 1 through 12 are complete in code. The remaining roadmap focus is Phase 13 hardening, demo readiness, and final validation.
 
 ---
 
@@ -27,16 +41,23 @@ Phases 1 through 10 are complete. The remaining roadmap work is now mainly Phase
 
 | Layer | Purpose | Main Location |
 |---|---|---|
-| User Interface | Pages for chat, planning, uploads, quizzes, dashboard, authentication, account, course selector, and course management | `src/ui/`, `app.py` |
-| Agent Layer | Specialized agents for routing, planning, RAG, quiz generation, evaluation, memory, safety, and database queries | `src/agents/` |
-| Memory Layer | Supabase repository and memory agent for cloud persistence | `src/memory/` |
-| Retrieval Layer | File extraction, chunking, sparse-vector embedding, course-scoped vector-store search, and local upload cleanup | `src/retrieval/` |
-| Prompt Layer | Reusable prompt registry and text templates for LLM-backed features | `src/prompts/` |
-| Tools Layer | Session state helpers, per-email workspace persistence, semantic cache, and Gemini LLM wrapper | `src/tools/` |
-| Tests | Automated test coverage for startup, auth, routing, memory, RAG, quiz, cache/query, multi-course, localization, and prompt templates | `tests/` |
-| Documentation | Setup guides, schema, roadmap, progress report, and AI integration notes | `README.md`, `project..md`, `docs/`, `explation.md`, `AI_explation.md` |
+| User Interface | Streamlit pages for auth, chat, planner, uploads, quiz, dashboard, settings, and account | `src/ui/`, `app.py` |
+| Agent Layer | Routing, planning, RAG, quiz generation, evaluation, reminders, memory sync, and structured queries | `src/agents/` |
+| Memory Layer | Supabase repository and memory sync layer | `src/memory/` |
+| Retrieval Layer | File extraction, chunking, sparse-vector indexing, and course-scoped search | `src/retrieval/` |
+| Prompt Layer | Prompt registry and reusable prompt templates | `src/prompts/` |
+| Tools Layer | Streamlit state, workspace persistence, semantic cache, quiz history, planner helpers, LLM wrapper | `src/tools/` |
+| Auth Layer | Supabase auth wrapper plus cookie/session persistence | `src/auth/` |
+| Tests | Startup, auth, routing, RAG, quiz, cache, multi-course, localization, settings, reminders | `tests/` |
+| Documentation | Setup, schema, roadmap, architecture guide, progress report, AI notes | `README.md`, `project..md`, `archticture.md`, `explation.md`, `AI_explation.md`, `docs/` |
 
-The main application entry point is `app.py`. It initializes runtime directories, Streamlit state, authentication, localization, top navigation, language selection, and global course controls.
+The main entrypoint is `app.py`. It initializes state, authentication, localization, page routing, the active-course selector, and global reminder notifications.
+
+For team handoff and ownership splitting, see:
+
+```text
+archticture.md
+```
 
 ---
 
@@ -46,30 +67,30 @@ The main application entry point is `app.py`. It initializes runtime directories
 
 **Status: Complete**
 
-Phase 1 established the Python/Streamlit project structure, dependencies, documentation, tests, and ignored runtime folders. Source code is organized into `src/agents`, `src/ui`, `src/memory`, `src/retrieval`, `src/tools`, and now `src/prompts`.
+Phase 1 established the project structure, Python dependencies, Streamlit entrypoint, documentation files, tests, and runtime directories.
 
 ## Phase 2 - Basic UI
 
 **Status: Complete**
 
-Phase 2 introduced the user-facing Streamlit screens:
+Phase 2 introduced the main Streamlit pages:
 
 - Login
 - Sign up
-- Account/logout
+- Account
 - Chat
 - Study Plan
 - Upload Materials
 - Quiz
 - Progress Dashboard
 
-The UI now also includes a language toggle, active-course selector, quick course creation, and course management controls.
+The UI now also includes language switching, global course selection, quick course creation, and course management.
 
 ## Phase 3 - Database and Memory
 
 **Status: Complete**
 
-Phase 3 added Supabase-backed memory:
+Phase 3 added Supabase-backed persistence with the repository pattern:
 
 - `student_profiles`
 - `courses`
@@ -77,60 +98,57 @@ Phase 3 added Supabase-backed memory:
 - `study_tasks`
 - `quiz_scores`
 - `weak_topics`
+- `chat_session_summaries`
+- `reminders`
 
-The memory layer uses a repository pattern through `SupabaseMemoryRepository` and `MemoryAgent`. Study plans, quiz attempts, weak topics, and preferred language can sync to Supabase when configured.
-
-The app also includes a proxy-safe Supabase client configuration. It creates the Supabase HTTP client with `trust_env=False` by default, preventing broken local proxy environment variables from causing login or memory failures. A `SUPABASE_TRUST_ENV_PROXY=true` override exists for environments that intentionally require a proxy.
+Memory sync is handled through `MemoryAgent` and `SupabaseMemoryRepository`. The app also supports local-first operation when Supabase is not configured.
 
 ## Phase 4 - Multi-Agent Graph
 
 **Status: Complete**
 
-Phase 4 introduced the multi-agent architecture:
+Phase 4 introduced:
 
 - `SafetyAgent`
 - `InputRouterAgent`
 - `SupervisorAgent`
 - `StudyPlannerAgent`
 - `MemoryAgent`
-- Route trace logging
+- route tracing in supervisor responses
 
-The supervisor screens requests, routes intent, runs specialist agents, and stores route traces. Route traces are now course-scoped so one course's agent history does not leak into another course.
+The supervisor now handles safety checks, intent routing, cache decisions, specialist-agent dispatch, and response packaging.
 
 ## Phase 5 - RAG System
 
 **Status: Complete**
 
-Phase 5 added retrieval over uploaded course materials:
+Phase 5 added course-material retrieval:
 
-- PDF, TXT, Markdown, DOCX, and PPTX text extraction
-- chunking
-- local sparse-vector embeddings
-- persistent vector store at `data/vector_store/course_materials.json`
+- file extraction for PDF, TXT, Markdown, DOCX, and PPTX
+- chunking and sparse-vector indexing
+- persistent vector store in `data/vector_store/course_materials.json`
 - `CourseMaterialIndexer`
 - `CourseRAGAgent`
-- source-cited answers
+- source-cited grounded answers
 
-Retrieval is course-scoped. Uploaded files are stored under a course-specific folder, indexed with `course_id` and `course_name`, and searched only within the selected course unless explicitly handled otherwise.
+Retrieval is course-scoped, so one course does not search another course's materials.
 
 ## Phase 6 - Quiz and Evaluation
 
 **Status: Complete**
 
-Phase 6 added real quiz generation and scoring:
+Phase 6 added:
 
-- topic-based MCQs
-- true/false questions
-- short-answer questions
+- MCQ generation
+- true/false generation
+- short-answer generation
 - matching questions
 - flashcards
-- optional RAG-grounded questions
-- partial scoring for text and matching answers
-- weak-topic detection
-- quiz attempt history
-- optional Supabase sync
-
-The Quiz page uses the selected course's plan, uploads, generated questions, and attempts.
+- optional RAG-grounded question creation
+- scoring with partial credit
+- weak-topic extraction
+- quiz history and duplicate avoidance
+- optional Supabase sync of quiz outcomes
 
 ## Phase 7 - CAG and Database Query
 
@@ -140,35 +158,28 @@ Phase 7 added:
 
 - `SemanticResponseCache`
 - cache storage at `data/cache/semantic_cache.json`
-- course-aware context fingerprints
+- context fingerprinting
 - cache hit/miss route traces
 - `DatabaseQueryAgent`
 - structured answers for progress, deadlines, scores, weak topics, and all-course summaries
 
-The cache only returns an answer when the new question is semantically similar, the language matches, and the course-aware context fingerprint matches.
+The cache is intentionally skipped for state-changing requests such as quiz generation and reminders.
 
 ## Phase 8 - Multi-Course Core Upgrade
 
 **Status: Complete**
 
-Phase 8 upgraded the app from a mostly single-course assistant into a multi-course study workspace.
+Phase 8 upgraded the app into a real multi-course workspace:
 
-Completed work:
-
-- Global active-course selector.
-- Quick course creation.
-- Course rename and delete controls.
-- `active_course_id` and `active_course_name` in state.
-- Course selection gating before chat, uploads, quiz, dashboard, and study-plan actions.
-- Course-scoped chat history.
-- Course-scoped study plans.
-- Course-scoped uploads and RAG chunks.
-- Course-scoped quiz attempts, weak topics, and generated questions.
-- Course-scoped route traces.
-- Friendly no-course empty states.
-- Per-email local workspace persistence in `data/user_state/`.
-
-The local workspace persistence means that when a user closes the app and later logs in with the same email, the app restores their courses, active course, study plans, uploaded-material metadata, quiz progress, route traces, chat history, and selected language.
+- active-course selector
+- quick course creation
+- rename/delete controls
+- course-scoped chat history
+- course-scoped plans
+- course-scoped uploads and RAG chunks
+- course-scoped quiz attempts and weak topics
+- course-scoped reminders
+- per-email local workspace persistence
 
 ## Phase 9 - Localization and UI Polish
 
@@ -176,53 +187,72 @@ The local workspace persistence means that when a user closes the app and later 
 
 Phase 9 added:
 
-- Arabic input detection.
-- English/Arabic language toggle.
-- Selected language saved in session state and user profile when Supabase memory is available.
-- UI localization dictionaries.
-- Localized labels, buttons, alerts, empty states, and assistant responses.
-- RTL layout when Arabic is selected.
-- Arabic-friendly typography.
-- Continued visual polish across pages.
-
-Phase 9 tests verify localization helpers, RTL CSS injection, and app startup with Arabic selected.
+- Arabic language detection
+- English/Arabic toggle
+- UI translation dictionaries
+- Arabic assistant response support
+- RTL layout
+- Arabic-friendly typography
+- visual polish across pages
 
 ## Phase 10 - Prompt Templates and LLM Quality
 
 **Status: Complete**
 
-Phase 10 moved LLM prompts out of hardcoded agent strings and into reusable prompt templates.
+Phase 10 moved active LLM prompts into reusable template files.
 
-Added prompt registry:
+Prompt registry:
 
 ```text
 src/prompts/registry.py
 ```
 
-Added required templates:
+Prompt template directory:
 
 ```text
-src/prompts/templates/course_question.system.txt
-src/prompts/templates/course_question.user.txt
-src/prompts/templates/rag_answer.system.txt
-src/prompts/templates/rag_answer.user.txt
-src/prompts/templates/lecture_summary.system.txt
-src/prompts/templates/lecture_summary.user.txt
-src/prompts/templates/quiz_generation.system.txt
-src/prompts/templates/quiz_generation.user.txt
-src/prompts/templates/progress_feedback.system.txt
-src/prompts/templates/progress_feedback.user.txt
-src/prompts/templates/study_planning.system.txt
-src/prompts/templates/study_planning.user.txt
+src/prompts/templates/
 ```
 
-The active LLM paths now render prompts through the shared registry:
+Active runtime use:
 
-- `CourseRAGAgent` uses `rag_answer`.
-- `QuizGeneratorAgent` uses `quiz_generation`.
-- `StudyPlannerAgent` uses `study_planning`.
+- `CourseRAGAgent` uses `rag_answer`
+- `QuizGeneratorAgent` uses `quiz_generation`
+- `StudyPlannerAgent` uses `study_planning`
 
-The prompt layer also includes ready templates for course Q&A, lecture summarization, and progress feedback for planned future agent upgrades.
+Additional templates are present for future upgrades:
+
+- `course_question`
+- `lecture_summary`
+- `progress_feedback`
+
+## Phase 11 - Planner Upgrade
+
+**Status: Complete**
+
+Phase 11 upgraded the planner from a simple date-based schedule into a more adaptive planner:
+
+- difficulty-aware planning
+- lecture-count input
+- finish-period input
+- weak-topic prioritization
+- delayed-task recovery sessions
+- progress snapshot support
+- recovery recommendations
+- stronger planner metadata in saved plans
+
+The planner now uses weak topics, overdue tasks, quiz attempts, and average score to shape the plan.
+
+## Phase 12 - Dashboard, Settings, and Reminders
+
+**Status: Complete**
+
+Phase 12 added:
+
+- dashboard course cards and summary tables
+- quiz trend and plan overview charts
+- settings page for language, hours, quiz defaults, difficulty defaults, and reminder preferences
+- course-scoped reminders for lecture, revision, quiz, missed-task, deadline, and custom reminders
+- due reminder filtering and dashboard reminder controls
 
 ---
 
@@ -242,14 +272,14 @@ The prompt layer also includes ready templates for course Q&A, lecture summariza
 | Phase 8 | Multi-Course Core Upgrade | Complete |
 | Phase 9 | Localization and UI Polish | Complete |
 | Phase 10 | Prompt Templates and LLM Quality | Complete |
+| Phase 11 | Planner Upgrade | Complete |
+| Phase 12 | Dashboard, Settings, and Reminders | Complete |
 
 ## Remaining Roadmap Work
 
 | Phase | Area | Status |
 |---|---|---|
-| Phase 11 | Study planner upgrades | Pending |
-| Phase 12 | Dashboard analytics and settings | Pending |
-| Phase 13 | Final demo script and manual validation | Pending |
+| Phase 13 | Final hardening, demo script, extra validation, and presentation prep | Pending |
 
 ---
 
@@ -258,36 +288,38 @@ The prompt layer also includes ready templates for course Q&A, lecture summariza
 Current test command:
 
 ```powershell
-.venv\Scripts\python.exe -m pytest
+python -m pytest
 ```
 
 Latest verified result:
 
 ```text
-51 passed
+134 passed
 ```
 
 Automated tests now cover:
 
-- App startup
-- Public pages
-- Authenticated pages
-- Auth service shape
-- Supabase proxy handling
-- Memory agent status
-- Input routing
-- Study planning
-- Supervisor traces
-- Course RAG indexing and retrieval
-- Quiz generation
-- Quiz evaluation
-- Semantic cache behavior
-- Structured database query behavior
-- Multi-course state separation
-- Course management behavior
-- Per-email workspace persistence
+- app startup
+- public pages
+- authenticated pages
+- auth service and session persistence
+- memory agent behavior
+- input routing
+- supervisor traces
+- course-material indexing and retrieval
+- quiz generation and evaluation
+- semantic cache behavior
+- structured query behavior
+- multi-course separation
+- workspace persistence
+- planner localization
 - Arabic localization and RTL
-- Prompt template rendering and agent integration
+- prompt rendering and prompt-backed agent integration
+- dashboard, settings, and reminder logic
+
+Current warning note:
+
+- the full suite passes, but there are Python 3.14 deprecation warnings around `datetime.utcnow()` and the Windows selector event-loop workaround in `app.py`
 
 ---
 
@@ -295,38 +327,41 @@ Automated tests now cover:
 
 The current system can:
 
-- authenticate users through Supabase,
-- avoid broken local proxy variables during Supabase calls,
-- restore a user's local workspace by email after app restart,
-- create, rename, delete, and select courses,
-- keep plans, uploads, quizzes, chat, route traces, and progress separated by course,
-- create personalized study plans,
-- save study plans locally and optionally to Supabase,
-- upload and index course files,
-- retrieve relevant course chunks,
-- answer course-material questions with citations,
-- generate quizzes and flashcards,
-- evaluate MCQ, true/false, short-answer, and matching responses,
-- track weak topics,
-- answer structured progress/deadline/score questions,
-- answer all-course progress summaries,
-- cache repeated questions safely using context fingerprints,
-- show route traces for agent transparency,
-- support English and Arabic UI/assistant responses,
-- apply RTL layout for Arabic,
-- render LLM prompts from reusable prompt templates,
-- fall back to deterministic offline behavior when Gemini is unavailable.
+- authenticate through Supabase or local demo mode
+- restore a user's local workspace by email
+- create, rename, delete, and select courses
+- keep chat, plans, uploads, quizzes, weak topics, and reminders separated by course
+- generate adaptive study plans
+- save plans locally and optionally to Supabase
+- upload and index course materials
+- answer course-material questions with citations
+- generate quizzes and flashcards
+- evaluate MCQ, true/false, short-answer, and matching responses
+- detect weak topics and feed them back into planning
+- answer structured progress, deadline, score, and weakness questions
+- reuse repeated read-only answers through semantic caching
+- support English and Arabic UI and responses
+- apply RTL layout when Arabic is selected
+- save user defaults for planner, quiz, and reminders
+- show dashboard analytics and reminder status
+- fall back to deterministic offline logic when Gemini is unavailable
 
 ---
 
 ## 7. Final Conclusion
 
-The project is in a strong state for a graduation demonstration. The core educational assistant workflow is complete through Phase 10 and includes authentication, multi-course state, local workspace persistence, memory, retrieval, quiz generation, evaluation, CAG, structured queries, localization, and reusable LLM prompt templates.
+The project is in a strong state for a graduation demo. The core educational workflow is complete through Phase 12 and includes authentication, multi-course separation, retrieval, planning, quizzing, memory, caching, dashboard analytics, reminders, localization, and prompt templating.
 
-Overall completion status:
+Current overall status:
 
 ```text
-Completed phases: 10
-Remaining roadmap: planner upgrades, dashboard/settings, and final demo preparation
-Overall implementation status: production-quality demo core complete
+Completed phases: 12
+Remaining roadmap: Phase 13 hardening and final demo validation
+Overall implementation status: strong demo-ready integrated system
+```
+
+For project division and ownership planning, use:
+
+```text
+archticture.md
 ```
