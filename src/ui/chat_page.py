@@ -2,7 +2,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.localization import t
+from src.localization import normalize_language, t
+from src.tools.output_filter import filter_output
 from src.tools.quiz_history import append_quiz_history
 from src.tools.state import (
     course_context,
@@ -54,7 +55,8 @@ def _assistant_reply(user_message: str) -> str:
             student_email=auth_user.get("email") if auth_user else None,
             student_name=(auth_user.get("user_metadata") or {}).get("full_name") if auth_user else None,
         )
-    return result["response"]
+    language = normalize_language(result.get("language") or get_selected_language())
+    return filter_output(result["response"], language)
 
 
 def _record_session_summary(chat_history: list[dict]) -> None:

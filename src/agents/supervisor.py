@@ -13,7 +13,8 @@ from src.agents.quiz_generator import QuizGeneratorAgent
 from src.agents.reminder_agent import ReminderAgent
 from src.agents.safety_agent import SafetyAgent
 from src.agents.study_planner import StudyPlannerAgent
-from src.localization import detect_language, normalize_language, t
+from src.localization import DEFAULT_LANGUAGE, detect_language, normalize_language, t
+from src.tools.output_filter import filter_output
 from src.tools.semantic_cache import SemanticResponseCache
 
 
@@ -85,14 +86,16 @@ class SupervisorAgent:
             )
         )
         if safety_status == "blocked" or not safety_result["safe"]:
-            return {
-                "response": self._safety_response(response_language),
-                "intent": "safety",
-                "language": response_language,
-                "agent": "safety_agent",
-                "trace": trace,
-                "payload": safety_result,
-            }
+            return self._finalize_handle_message_result(
+                {
+                    "response": self._safety_response(response_language),
+                    "intent": "safety",
+                    "language": response_language,
+                    "agent": "safety_agent",
+                    "trace": trace,
+                    "payload": safety_result,
+                }
+            )
 
         routed_input = self.router.route(user_message)
         if routed_input["language"] != "ar":
@@ -148,14 +151,16 @@ class SupervisorAgent:
                     validation_payload,
                 )
             )
-            return {
-                "response": self._course_required_response(routed_input["language"]),
-                "intent": routed_input["intent"],
-                "language": routed_input["language"],
-                "agent": "course_scope_validator",
-                "trace": trace,
-                "payload": validation_payload,
-            }
+            return self._finalize_handle_message_result(
+                {
+                    "response": self._course_required_response(routed_input["language"]),
+                    "intent": routed_input["intent"],
+                    "language": routed_input["language"],
+                    "agent": "course_scope_validator",
+                    "trace": trace,
+                    "payload": validation_payload,
+                }
+            )
 
         self._sync_plan_completion_context(context)
         context_fingerprint = self._context_fingerprint(context)
@@ -188,21 +193,23 @@ class SupervisorAgent:
                         {"agent": cached_result["agent"]},
                     )
                 )
-                return {
-                    "response": cached_result["response"],
-                    "intent": cached_result["intent"],
-                    "language": routed_input["language"],
-                    "agent": cached_result["agent"],
-                    "trace": trace,
-                    "payload": {
-                        **cached_result.get("payload", {}),
-                        "cache": {
-                            "hit": True,
-                            "similarity": cached_result["similarity"],
-                            "cached_at_utc": cached_result["cached_at_utc"],
+                return self._finalize_handle_message_result(
+                    {
+                        "response": cached_result["response"],
+                        "intent": cached_result["intent"],
+                        "language": routed_input["language"],
+                        "agent": cached_result["agent"],
+                        "trace": trace,
+                        "payload": {
+                            **cached_result.get("payload", {}),
+                            "cache": {
+                                "hit": True,
+                                "similarity": cached_result["similarity"],
+                                "cached_at_utc": cached_result["cached_at_utc"],
+                            },
                         },
-                    },
-                }
+                    }
+                )
 
             trace.append(
                 self._trace_step(
@@ -241,18 +248,7 @@ class SupervisorAgent:
             )
         )
 
-        if cacheable:
-            self.semantic_cache.store(
-                message=routed_input["message"],
-                language=routed_input["language"],
-                intent=routed_input["intent"],
-                agent=selected_agent,
-                response=agent_result["response"],
-                payload=agent_result.get("payload", {}),
-                context_fingerprint=context_fingerprint,
-            )
-
-        return {
+        pending_result = {
             "response": agent_result["response"],
             "intent": routed_input["intent"],
             "language": routed_input["language"],
@@ -260,6 +256,20 @@ class SupervisorAgent:
             "trace": trace,
             "payload": agent_result.get("payload", {}),
         }
+        finalized = self._finalize_handle_message_result(pending_result)
+
+        if cacheable:
+            self.semantic_cache.store(
+                message=routed_input["message"],
+                language=routed_input["language"],
+                intent=routed_input["intent"],
+                agent=selected_agent,
+                response=finalized["response"],
+                payload=agent_result.get("payload", {}),
+                context_fingerprint=context_fingerprint,
+            )
+
+        return finalized
 
     def create_study_plan(
         self,
@@ -562,6 +572,37 @@ class SupervisorAgent:
                 )
             ],
         }
+
+    def _filter_student_response(self, response: str, language: str) -> str:
+        return filter_output(response, language)
+
+    def _finalize_handle_message_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        language = str(result.get("language") or DEFAULT_LANGUAGE)
+        original = str(result.get("response") or "")
+        filtered = self._filter_student_response(original, language)
+        if filtered == original:
+            return result
+
+        trace = list(result.get("trace") or [])
+        trace.append(
+            self._trace_step(
+                "filter_output",
+                "ResponseAgent",
+                "sanitized assistant response before display",
+                "filtered",
+                {
+                    "original_length": len(original),
+                    "filtered_length": len(filtered),
+                },
+            )
+        )
+        updated = dict(result)
+        updated["response"] = filtered
+        updated["trace"] = trace
+        payload = dict(updated.get("payload") or {})
+        payload["output_filtered"] = True
+        updated["payload"] = payload
+        return updated
 
     def _safety_response(self, language: str) -> str:
         return t("agent.safety", language)
