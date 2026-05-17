@@ -7,7 +7,7 @@ from src.config import PROJECT_ROOT, load_project_env
 load_project_env()
 
 from src.auth import AuthService
-from src.auth.session_persistence import restore_authenticated_session
+from src.auth.session_persistence import bootstrap_authentication
 from src.localization import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, t
 from src.retrieval import CourseMaterialIndexer
 from src.tools.llm_client import LLMSettings, get_llm_settings, log_gemini_key_status
@@ -80,7 +80,7 @@ def main() -> None:
     memory_agent = get_memory_agent()
     auth_service = AuthService()
 
-    restore_authenticated_session(auth_service)
+    bootstrap_authentication(auth_service)
 
     user = get_authenticated_user()
     if user:

@@ -57,7 +57,20 @@ class InputRouterAgent:
         ],
         "memory": ["remember", "memory", "stored", "saved"],
         "reminder": ["remind", "reminder", "notify", "notification", "alert", "missed task"],
-        "study_plan": ["plan", "schedule", "study", "revise", "revision", "today", "tomorrow", "exam", "weak"],
+        "study_plan": [
+            "plan",
+            "schedule",
+            "study",
+            "revise",
+            "revision",
+            "today",
+            "tomorrow",
+            "exam",
+            "weak",
+            "next",
+            "what is next",
+            "what's next",
+        ],
     }
 
     ARABIC_KEYWORDS = {
@@ -66,7 +79,24 @@ class InputRouterAgent:
         "database_query": ["موعد", "مواعيد", "تقدم", "التقدم", "أنجزت", "المتبقي", "درجات", "درجة", "متوسط", "ضعفي"],
         "memory": ["تذكر", "ذاكرة", "محفوظ", "حفظت"],
         "reminder": ["ذكرني", "تذكير", "نبهني", "تنبيه", "اشعار", "إشعار", "فاتتني"],
-        "study_plan": ["خطة", "جدول", "اذاكر", "أذاكر", "مراجعة", "امتحان", "الامتحان", "اليوم", "بكرة"],
+        "study_plan": [
+            "خطة",
+            "جدول",
+            "اذاكر",
+            "أذاكر",
+            "مراجعة",
+            "امتحان",
+            "الامتحان",
+            "اليوم",
+            "بكرة",
+            "التالي",
+            "مطلوب",
+            "ايه",
+            "إيه",
+            "ايش",
+            "النهارده",
+            "نهارده",
+        ],
     }
 
     def route(self, user_message: str) -> dict:

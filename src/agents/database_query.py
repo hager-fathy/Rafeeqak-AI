@@ -73,11 +73,14 @@ class DatabaseQueryAgent:
         return "progress"
 
     def _local_data(self, context: dict[str, Any]) -> dict[str, Any]:
+        from src.tools.study_plan_tasks import is_task_completed, list_pending_tasks
+
         active_plan = context.get("active_plan") or {}
         tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
         quiz_attempts = context.get("quiz_attempts", []) or []
-        completed_tasks = [task for task in tasks if task.get("completed")]
-        remaining_tasks = [task for task in tasks if not task.get("completed")]
+        course_scope = context.get("active_course_id")
+        completed_tasks = [task for task in tasks if isinstance(task, dict) and is_task_completed(task, active_plan)]
+        remaining_tasks = list_pending_tasks(active_plan, course_scope)
         weak_topics = list(active_plan.get("weak_topics", [])) if isinstance(active_plan, dict) else []
         quiz_weak_topics = []
         for attempt in quiz_attempts:
@@ -143,10 +146,12 @@ class DatabaseQueryAgent:
             percent=percent,
         )
         if next_task:
+            from src.tools.planner_localization import localize_planner_topic
+
             response += t(
                 "db.next_task",
                 language,
-                topic=next_task["topic"],
+                topic=localize_planner_topic(str(next_task.get("topic") or ""), language),
                 date=next_task["date"],
                 hours=next_task["hours"],
             )

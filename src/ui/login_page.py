@@ -2,7 +2,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.auth import AuthService
+from src.auth import AuthService, rerun_after_auth_state_change
 from src.localization import t
 from src.tools.state import get_selected_language, set_authenticated_user
 from src.ui.theme import render_page_hero
@@ -46,6 +46,6 @@ def render_login_page(project_root: Path) -> None:
                             refresh_token=result["refresh_token"],
                         )
                         st.success(t("login.success", language))
-                        st.rerun()
+                        rerun_after_auth_state_change()
                     else:
                         st.error(result["message"])

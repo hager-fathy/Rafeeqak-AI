@@ -389,51 +389,57 @@ class StudyPlannerAgent:
             hours = max(hours, min(daily_hours + 0.5, 12.0))
         return min(max(hours, 0.5), 12.0)
 
-    def recommend_next(self, active_plan: dict[str, Any] | None) -> dict[str, Any]:
+    def recommend_next(
+        self,
+        active_plan: dict[str, Any] | None,
+        *,
+        course_scope: str | None = None,
+        today_only: bool = False,
+        language: str = "en",
+    ) -> dict[str, Any]:
+        from src.tools.planner_localization import format_study_recommendation
+        from src.tools.study_plan_tasks import select_next_task
+
+        language = normalize_language(language)
         if not active_plan:
             return {
                 "ok": False,
-                "response": "I do not have a study plan yet. Open the Study Plan page and generate one first.",
+                "response": t("agent.planner.no_plan_yet", language),
             }
 
-        upcoming_tasks = [task for task in active_plan.get("tasks", []) if not task.get("completed")]
-        if not upcoming_tasks:
+        task = select_next_task(active_plan, course_scope, today_only=today_only)
+        if task is None:
             return {
                 "ok": True,
-                "response": "Nice work. You completed all tasks in the current plan. Generate a fresh revision plan.",
+                "response": t("agent.planner.all_done", language),
             }
 
-        task = upcoming_tasks[0]
-        checkpoint_note = " It also includes a checkpoint quiz." if task.get("checkpoint") else ""
         return {
             "ok": True,
             "task": task,
-            "response": (
-                f"Today focus on {task['topic']} ({task['hours']}h). "
-                f"Goal: {task['task']}{checkpoint_note}"
-            ),
+            "response": format_study_recommendation(task, language),
         }
 
-    def explain_priorities(self, active_plan: dict[str, Any] | None) -> dict[str, Any]:
+    def explain_priorities(self, active_plan: dict[str, Any] | None, *, language: str = "en") -> dict[str, Any]:
+        from src.tools.planner_localization import format_priority_explanation
+
+        language = normalize_language(language)
         if not active_plan:
             return {
                 "ok": False,
-                "response": "Add weak topics in the Study Plan page, then I can prioritize them in your schedule.",
+                "response": t("agent.planner.add_weak", language),
             }
 
         weak_topics = active_plan.get("weak_topics", [])
         if not weak_topics:
             return {
                 "ok": True,
-                "response": "Your current plan has no weak topics marked, so it rotates revision topics evenly.",
+                "response": t("agent.planner.no_weak", language),
             }
 
         return {
             "ok": True,
-            "response": (
-                "Your current plan gives extra turns to weak topics before regular revision topics. "
-                f"Priority topics: {', '.join(weak_topics)}."
-            ),
+            "response": format_priority_explanation(active_plan, language),
         }
 
     def _coerce_date(self, value: Any) -> date:

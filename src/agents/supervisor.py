@@ -15,7 +15,6 @@ from src.agents.safety_agent import SafetyAgent
 from src.agents.study_planner import StudyPlannerAgent
 from src.localization import detect_language, normalize_language, t
 from src.tools.semantic_cache import SemanticResponseCache
-from src.tools.quiz_history import quiz_history_avoid_questions
 
 
 class SupervisorAgent:
@@ -154,6 +153,7 @@ class SupervisorAgent:
                 "payload": validation_payload,
             }
 
+        self._sync_plan_completion_context(context)
         context_fingerprint = self._context_fingerprint(context)
         cacheable = self._is_cacheable(selected_agent, routed_input)
         if cacheable:
@@ -271,13 +271,7 @@ class SupervisorAgent:
                 "SupervisorAgent",
                 "received study-plan form data",
                 "completed",
-                {
-                    "course_name": profile.get("course_name"),
-                    "daily_hours": profile.get("daily_hours"),
-                    "difficulty": profile.get("difficulty"),
-                    "lecture_count": profile.get("lecture_count"),
-                    "finish_period_days": profile.get("finish_period_days"),
-                },
+                {"course_name": profile.get("course_name"), "daily_hours": profile.get("daily_hours")},
             ),
             self._trace_step(
                 "select_agent",
@@ -300,8 +294,6 @@ class SupervisorAgent:
                     "tasks": len(plan["tasks"]),
                     "weak_topics": plan["weak_topics"],
                     "exam_date": plan["exam_date"],
-                    "difficulty": plan.get("difficulty"),
-                    "lecture_count": plan.get("lecture_count"),
                 },
             )
         )
@@ -364,10 +356,18 @@ class SupervisorAgent:
         active_plan = context.get("active_plan")
         priority_terms = ("weak", "priority", "prioritize", "ضعف", "أولوية", "اولويه")
         if any(term in message for term in priority_terms):
-            planner_result = self.study_planner.explain_priorities(active_plan)
+            planner_result = self.study_planner.explain_priorities(
+                active_plan,
+                language=routed_input["language"],
+            )
             action = "explained weak-topic prioritization"
         else:
-            planner_result = self.study_planner.recommend_next(active_plan)
+            planner_result = self.study_planner.recommend_next(
+                active_plan,
+                course_scope=context.get("active_course_id"),
+                today_only=self._prefers_today_task(routed_input["message"]),
+                language=routed_input["language"],
+            )
             action = "recommended the next study task"
 
         return {
@@ -418,11 +418,7 @@ class SupervisorAgent:
             language=routed_input["language"],
             difficulty=context.get("quiz_difficulty", "medium"),
             question_types=context.get("question_types") or ["mcq"],
-            avoid_questions=quiz_history_avoid_questions(
-                context.get("generated_questions"),
-                course_id=context.get("active_course_id"),
-                topic=topic,
-            ),
+            previous_questions=context.get("generated_questions") or [],
         )
         response = t("agent.quiz.prepared", routed_input["language"], count=quiz_result["count"], topic=topic)
         return {
@@ -569,34 +565,37 @@ class SupervisorAgent:
     def _course_required_response(self, language: str) -> str:
         return t("agent.course_required", language)
 
+    def _sync_plan_completion_context(self, context: dict[str, Any]) -> None:
+        active_plan = context.get("active_plan")
+        if not isinstance(active_plan, dict):
+            return
+        course_scope = context.get("active_course_id") or active_plan.get("course_name")
+        if not course_scope:
+            return
+        from src.tools.study_plan_tasks import sync_completion_fields
+
+        sync_completion_fields(active_plan, course_scope=str(course_scope))
+
+    def _prefers_today_task(self, message: str) -> bool:
+        lowered = str(message or "").casefold()
+        today_terms = {
+            "today",
+            "اليوم",
+            "النهارده",
+            "نهارده",
+            "انهارده",
+            "انهرض",
+        }
+        return any(term in lowered for term in today_terms)
+
     def _study_planner_response(
         self,
         planner_result: dict[str, Any],
         active_plan: dict[str, Any] | None,
         language: str,
     ) -> str:
-        if language != "ar":
-            return planner_result["response"]
-        if not active_plan:
-            if "prioritize" in planner_result.get("response", "").lower():
-                return t("agent.planner.add_weak", language)
-            return t("agent.planner.no_active", language)
-
-        task = planner_result.get("task")
-        if task:
-            checkpoint_note = t("agent.planner.checkpoint", language) if task.get("checkpoint") else ""
-            return t(
-                "agent.planner.today",
-                language,
-                topic=task["topic"],
-                hours=task["hours"],
-                checkpoint_note=checkpoint_note,
-            )
-
-        weak_topics = active_plan.get("weak_topics", [])
-        if weak_topics:
-            return t("agent.planner.priorities", language, topics=", ".join(weak_topics))
-        return t("agent.planner.no_weak", language)
+        del active_plan
+        return str(planner_result.get("response") or "")
 
     def _context_fingerprint(self, context: dict[str, Any]) -> str:
         active_plan = context.get("active_plan") or {}
@@ -613,13 +612,11 @@ class SupervisorAgent:
             "exam_date": active_plan.get("exam_date") if isinstance(active_plan, dict) else None,
             "daily_hours": active_plan.get("daily_hours") if isinstance(active_plan, dict) else None,
             "difficulty": active_plan.get("difficulty") if isinstance(active_plan, dict) else None,
-            "lecture_count": active_plan.get("lecture_count") if isinstance(active_plan, dict) else None,
-            "finish_period_days": active_plan.get("finish_period_days") if isinstance(active_plan, dict) else None,
-            "delayed_task_count": active_plan.get("delayed_task_count") if isinstance(active_plan, dict) else None,
             "other_topics": active_plan.get("other_topics", []) if isinstance(active_plan, dict) else [],
             "tasks": self._stable_digest(
                 [
                     {
+                        "task_id": task.get("task_id"),
                         "date": task.get("date"),
                         "topic": task.get("topic"),
                         "phase": task.get("phase"),

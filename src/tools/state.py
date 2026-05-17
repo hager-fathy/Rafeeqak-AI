@@ -403,14 +403,19 @@ def upsert_active_chat_summary(summary: dict, *, limit: int = 20) -> None:
 
 
 def course_context() -> dict:
+    from src.tools.study_plan_tasks import sync_completion_fields
+
     active_course = get_active_course()
     bucket = get_active_course_bucket()
     user_settings = get_user_settings()
+    active_plan = bucket.get("active_plan")
+    if isinstance(active_plan, dict) and active_course:
+        sync_completion_fields(active_plan, course_scope=active_course["id"])
     return {
         "active_course": active_course,
         "active_course_id": active_course["id"] if active_course else None,
         "active_course_name": active_course["name"] if active_course else None,
-        "active_plan": bucket.get("active_plan"),
+        "active_plan": active_plan,
         "study_plans": bucket.get("study_plans", []),
         "quiz_attempts": bucket.get("quiz_attempts", []),
         "active_quiz": bucket.get("active_quiz"),
@@ -478,11 +483,15 @@ def _all_course_summaries() -> list[dict]:
         bucket = course_data.get(course["id"], _empty_course_bucket())
         active_plan = bucket.get("active_plan") or {}
         tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
-        completed_tasks = [task for task in tasks if isinstance(task, dict) and task.get("completed")]
+        from src.tools.study_plan_tasks import is_task_completed
+
+        completed_tasks = [task for task in tasks if isinstance(task, dict) and is_task_completed(task, active_plan)]
         upcoming_tasks = [
             task
             for task in tasks
-            if isinstance(task, dict) and not task.get("completed") and str(task.get("date", "")).strip()
+            if isinstance(task, dict)
+            and not is_task_completed(task, active_plan)
+            and str(task.get("date", "")).strip()
         ]
         upcoming_tasks = sorted(upcoming_tasks, key=lambda task: str(task.get("date") or ""))
         next_task = upcoming_tasks[0] if upcoming_tasks else None

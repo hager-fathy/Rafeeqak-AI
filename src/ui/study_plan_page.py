@@ -9,6 +9,7 @@ from src.localization import t
 from src.tools.study_plan_tasks import (
     apply_manual_completion_updates,
     ensure_task_ids,
+    is_task_completed,
     sync_active_plan_history,
     tasks_to_timeline_rows,
 )
@@ -53,12 +54,12 @@ def _derived_weak_topics(current_context: dict) -> list[str]:
 def _progress_snapshot(current_context: dict) -> dict:
     active_plan = current_context.get("active_plan") or {}
     tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
-    completed_tasks = [task for task in tasks if isinstance(task, dict) and task.get("completed")]
+    completed_tasks = [task for task in tasks if isinstance(task, dict) and is_task_completed(task, active_plan)]
     overdue_tasks = [
         task
         for task in tasks
         if isinstance(task, dict)
-        and not task.get("completed")
+        and not is_task_completed(task, active_plan)
         and str(task.get("date", "")).strip()
         and str(task["date"]) < date.today().isoformat()
     ]
@@ -335,4 +336,5 @@ def render_study_plan_page(project_root: Path) -> None:
         )
         touch_activity()
         st.success(t("planner.timeline_saved", language))
+        st.rerun()
 

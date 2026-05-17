@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import date
 from typing import Any
 
 from src.localization import t
+
+COMPLETIONS_FIELD = "task_completions"
 
 
 def is_quiz_task(task: dict[str, Any]) -> bool:
@@ -43,6 +46,70 @@ def build_task_id(task: dict[str, Any], course_scope: str | None) -> str:
     return f"task-{digest}"
 
 
+def make_task_id(course_id: str, task: dict[str, Any]) -> str:
+    """Stable task identifier scoped to a course."""
+    return build_task_id(task, course_id)
+
+
+def get_task_completions(plan: dict[str, Any]) -> dict[str, bool]:
+    if not isinstance(plan, dict):
+        return {}
+    raw = plan.get(COMPLETIONS_FIELD)
+    if not isinstance(raw, dict):
+        raw = {}
+        plan[COMPLETIONS_FIELD] = raw
+    return raw
+
+
+def is_task_completed(task: dict[str, Any], plan: dict[str, Any] | None = None) -> bool:
+    if not isinstance(task, dict):
+        return False
+    task_id = str(task.get("task_id") or "").strip()
+    if plan is not None and task_id:
+        completions = get_task_completions(plan)
+        if task_id in completions:
+            return bool(completions[task_id])
+    return bool(task.get("completed"))
+
+
+def set_task_completed(
+    plan: dict[str, Any],
+    task: dict[str, Any],
+    completed: bool,
+    *,
+    course_scope: str | None,
+) -> None:
+    if not isinstance(plan, dict) or not isinstance(task, dict):
+        return
+    sync_quiz_required(task)
+    task_id = build_task_id(task, course_scope)
+    task["task_id"] = task_id
+    task["completed"] = bool(completed)
+    get_task_completions(plan)[task_id] = bool(completed)
+
+
+def sync_completion_fields(plan: dict[str, Any], *, course_scope: str | None) -> None:
+    """Keep task.completed and task_completions aligned (completion map is authoritative)."""
+    if not isinstance(plan, dict):
+        return
+    completions = get_task_completions(plan)
+    tasks = plan.get("tasks", [])
+    if not isinstance(tasks, list):
+        return
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        sync_quiz_required(task)
+        task_id = build_task_id(task, course_scope)
+        task["task_id"] = task_id
+        if task_id in completions:
+            task["completed"] = bool(completions[task_id])
+        elif bool(task.get("completed")):
+            completions[task_id] = True
+        else:
+            completions.setdefault(task_id, False)
+
+
 def ensure_task_ids(plan: dict[str, Any], course_scope: str | None) -> None:
     tasks = plan.get("tasks", [])
     if not isinstance(tasks, list):
@@ -52,6 +119,64 @@ def ensure_task_ids(plan: dict[str, Any], course_scope: str | None) -> None:
             continue
         sync_quiz_required(task)
         task["task_id"] = build_task_id(task, course_scope)
+    sync_completion_fields(plan, course_scope=course_scope)
+
+
+def _parse_task_date(value: Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _task_sort_key(task: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(task.get("date") or ""),
+        str(task.get("phase") or ""),
+        str(task.get("topic") or ""),
+    )
+
+
+def list_pending_tasks(
+    plan: dict[str, Any] | None,
+    course_scope: str | None,
+    *,
+    today_only: bool = False,
+) -> list[dict[str, Any]]:
+    if not isinstance(plan, dict):
+        return []
+
+    sync_completion_fields(plan, course_scope=course_scope)
+    today = date.today()
+    pending: list[dict[str, Any]] = []
+    for task in plan.get("tasks", []) or []:
+        if not isinstance(task, dict) or is_task_completed(task, plan):
+            continue
+        if today_only:
+            task_date = _parse_task_date(task.get("date"))
+            if task_date is None or task_date != today:
+                continue
+        pending.append(task)
+
+    pending.sort(key=_task_sort_key)
+    return pending
+
+
+def select_next_task(
+    plan: dict[str, Any] | None,
+    course_scope: str | None,
+    *,
+    today_only: bool = False,
+) -> dict[str, Any] | None:
+    pending = list_pending_tasks(plan, course_scope, today_only=today_only)
+    if not pending and today_only:
+        pending = list_pending_tasks(plan, course_scope, today_only=False)
+    return pending[0] if pending else None
 
 
 def quiz_required_label(task: dict[str, Any], language: str) -> str:
@@ -71,13 +196,14 @@ def mark_done_hint(task: dict[str, Any], language: str) -> str:
 
 def tasks_to_timeline_rows(tasks: list[dict[str, Any]], *, language: str, course_scope: str | None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    plan = {"tasks": tasks}
+    sync_completion_fields(plan, course_scope=course_scope)
     for task in tasks:
         if not isinstance(task, dict):
             continue
         sync_quiz_required(task)
         task_id = build_task_id(task, course_scope)
         task["task_id"] = task_id
-        task.setdefault("completed", False)
         rows.append(
             {
                 "task_id": task_id,
@@ -87,7 +213,7 @@ def tasks_to_timeline_rows(tasks: list[dict[str, Any]], *, language: str, course
                 "task": task.get("task", ""),
                 "hours": task.get("hours", 0),
                 "quiz_required_label": quiz_required_label(task, language),
-                "mark_as_done": bool(task.get("completed")),
+                "mark_as_done": is_task_completed(task, plan),
                 "completion_note": mark_done_hint(task, language),
             }
         )
@@ -124,8 +250,8 @@ def apply_manual_completion_updates(
         if task is None or is_quiz_task(task):
             continue
         edited_completed = bool(row.get("mark_as_done"))
-        if bool(task.get("completed")) != edited_completed:
-            task["completed"] = edited_completed
+        if is_task_completed(task, active_plan) != edited_completed:
+            set_task_completed(active_plan, task, edited_completed, course_scope=course_scope)
             changed = True
     return changed
 
@@ -154,14 +280,14 @@ def mark_matching_quiz_task_completed(
 
     candidates: list[dict[str, Any]] = []
     for task in tasks:
-        if not isinstance(task, dict) or not is_quiz_task(task) or task.get("completed"):
+        if not isinstance(task, dict) or not is_quiz_task(task) or is_task_completed(task, active_plan):
             continue
         if _topic_matches(str(task.get("topic") or ""), topic):
             candidates.append(task)
 
     if not candidates:
         for task in tasks:
-            if not isinstance(task, dict) or not is_quiz_task(task) or task.get("completed"):
+            if not isinstance(task, dict) or not is_quiz_task(task) or is_task_completed(task, active_plan):
                 continue
             candidates.append(task)
 
@@ -174,9 +300,9 @@ def mark_matching_quiz_task_completed(
         return priority, str(task.get("date") or "")
 
     target = sorted(candidates, key=_sort_key)[0]
-    if target.get("completed"):
+    if is_task_completed(target, active_plan):
         return False
-    target["completed"] = True
+    set_task_completed(active_plan, target, True, course_scope=course_scope)
     return True
 
 

@@ -1,9 +1,19 @@
+from datetime import date, timedelta
+
+from src.agents.study_planner import StudyPlannerAgent
+from src.agents.supervisor import SupervisorAgent
+from src.tools.semantic_cache import SemanticResponseCache
 from src.tools.study_plan_tasks import (
     apply_manual_completion_updates,
     build_task_id,
+    get_task_completions,
     is_quiz_task,
+    is_task_completed,
+    list_pending_tasks,
+    make_task_id,
     mark_matching_quiz_task_completed,
     quiz_required_label,
+    select_next_task,
     tasks_to_timeline_rows,
 )
 from src.tools.state import add_course, course_context, init_state, set_active_course, update_active_course_bucket
@@ -17,14 +27,16 @@ def _sample_plan(*, course_scope: str = "course-a") -> dict:
             "topic": "SVM",
             "phase": "Concept review",
             "task": "Review lecture notes",
+            "hours": 2.0,
             "checkpoint": False,
             "completed": False,
         },
         {
             "date": "2026-05-02",
-            "topic": "SVM",
+            "topic": "Neural Networks",
             "phase": "Checkpoint quiz",
-            "task": "Take a checkpoint quiz on SVM",
+            "task": "Take a checkpoint quiz on Neural Networks",
+            "hours": 1.5,
             "checkpoint": True,
             "quiz_required": True,
             "completed": False,
@@ -156,6 +168,71 @@ def test_record_attempt_marks_quiz_task_completed() -> None:
     )
 
     assert course_context()["active_plan"]["tasks"][1]["completed"] is True
+
+
+def test_make_task_id_matches_build_task_id() -> None:
+    task = {"date": "2026-05-01", "topic": "SVM", "phase": "Review", "task": "Read notes"}
+    assert make_task_id("course-a", task) == build_task_id(task, "course-a")
+
+
+def test_completion_map_is_shared_source_of_truth() -> None:
+    plan = _sample_plan()
+    task_id = plan["tasks"][0]["task_id"]
+    get_task_completions(plan)[task_id] = True
+    plan["tasks"][0]["completed"] = False
+
+    assert is_task_completed(plan["tasks"][0], plan) is True
+    pending_ids = {task["task_id"] for task in list_pending_tasks(plan, "course-a")}
+    assert task_id not in pending_ids
+
+
+def test_recommend_next_skips_completed_task(tmp_path) -> None:
+    plan = _sample_plan()
+    apply_manual_completion_updates(
+        plan,
+        [{"task_id": plan["tasks"][0]["task_id"], "mark_as_done": True}],
+        course_scope="course-a",
+    )
+
+    result = StudyPlannerAgent().recommend_next(plan, course_scope="course-a")
+    assert result["ok"] is True
+    assert result["task"]["task_id"] == plan["tasks"][1]["task_id"]
+
+
+def test_supervisor_today_prompt_skips_completed_task(tmp_path) -> None:
+    plan = _sample_plan()
+    plan["tasks"][0]["date"] = date.today().isoformat()
+    apply_manual_completion_updates(
+        plan,
+        [{"task_id": plan["tasks"][0]["task_id"], "mark_as_done": True}],
+        course_scope="course-a",
+    )
+
+    supervisor = SupervisorAgent(semantic_cache=SemanticResponseCache(cache_path=tmp_path / "cache.json"))
+    result = supervisor.handle_message(
+        "What should I study today?",
+        context={
+            "active_plan": plan,
+            "active_course_id": "course-a",
+            "uploads": [],
+            "quiz_attempts": [],
+        },
+    )
+
+    assert result["agent"] == "study_planner_agent"
+    assert plan["tasks"][0]["topic"] not in result["response"]
+    assert "Neural Networks" in result["response"]
+
+
+def test_select_next_task_prefers_today_when_available() -> None:
+    plan = _sample_plan()
+    today = date.today().isoformat()
+    plan["tasks"][0]["date"] = today
+    plan["tasks"][1]["date"] = (date.today() + timedelta(days=3)).isoformat()
+
+    next_task = select_next_task(plan, "course-a", today_only=True)
+    assert next_task is not None
+    assert next_task["date"] == today
 
 
 def test_completion_state_is_scoped_by_course_id() -> None:

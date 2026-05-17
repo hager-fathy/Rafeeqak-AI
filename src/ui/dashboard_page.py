@@ -11,6 +11,7 @@ from src.agents.reminder_agent import ReminderAgent
 from src.localization import t
 from src.retrieval import CourseMaterialIndexer
 from src.tools.semantic_cache import SemanticResponseCache
+from src.tools.study_plan_tasks import is_task_completed
 from src.tools.state import (
     course_context,
     get_active_course,
@@ -183,8 +184,8 @@ def _render_course_overview(all_courses: list[dict[str, Any]], language: str) ->
 def _render_active_course_panels(current_context: dict[str, Any], language: str) -> None:
     active_plan = current_context.get("active_plan") or {}
     tasks = active_plan.get("tasks", []) if isinstance(active_plan, dict) else []
-    completed_tasks = [task for task in tasks if isinstance(task, dict) and task.get("completed")]
-    upcoming_tasks = [task for task in tasks if isinstance(task, dict) and not task.get("completed")]
+    completed_tasks = [task for task in tasks if isinstance(task, dict) and is_task_completed(task, active_plan)]
+    upcoming_tasks = [task for task in tasks if isinstance(task, dict) and not is_task_completed(task, active_plan)]
     deadline = active_plan.get("exam_date") if isinstance(active_plan, dict) else None
 
     col1, col2, col3, col4, col5, col6 = st.columns(6)

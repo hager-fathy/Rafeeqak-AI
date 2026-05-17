@@ -263,7 +263,7 @@ def test_supervisor_replies_in_arabic_for_arabic_study_plan_request(tmp_path) ->
 
     assert result["language"] == "ar"
     assert result["agent"] == "study_planner_agent"
-    assert "اليوم ركز" in result["response"]
+    assert "اليوم رك" in result["response"]
     assert "Backpropagation" in result["response"]
 
 

@@ -123,7 +123,11 @@ class ReminderAgent:
         upcoming_tasks = []
         missed_tasks = []
         for task in tasks:
-            if not isinstance(task, dict) or task.get("completed"):
+            if not isinstance(task, dict):
+                continue
+            from src.tools.study_plan_tasks import is_task_completed
+
+            if is_task_completed(task, active_plan):
                 continue
             task_date = self._parse_date(task.get("date"))
             if task_date is None:
