@@ -71,16 +71,20 @@ class SupervisorAgent:
         response_language = "ar" if input_language == "ar" else preferred_language
 
         safety_result = self.safety.check(user_message)
+        safety_status = str(
+            safety_result.get("safety_status")
+            or ("passed" if safety_result["safe"] else "blocked")
+        )
         trace.append(
             self._trace_step(
                 "safety_check",
                 "SafetyAgent",
                 "screened request for blocked prompt-injection markers",
-                "blocked" if not safety_result["safe"] else "passed",
-                safety_result,
+                safety_status,
+                {**safety_result, "safety_status": safety_status},
             )
         )
-        if not safety_result["safe"]:
+        if safety_status == "blocked" or not safety_result["safe"]:
             return {
                 "response": self._safety_response(response_language),
                 "intent": "safety",
