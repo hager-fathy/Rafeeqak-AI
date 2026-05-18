@@ -182,13 +182,15 @@ def test_rag_agent_uses_rag_prompt_template(tmp_path) -> None:
     ).answer("What uses gradients?", course_id="ml", course_name="Machine Learning")
 
     assert result["generation_mode"] == "llm"
+    assert result["response"] == "LLM answer"
     assert "Retrieved context" in llm.calls[0]["user_prompt"]
-    assert "Available source labels" in llm.calls[0]["user_prompt"]
+    assert "Internal source IDs" in llm.calls[0]["user_prompt"]
     assert "Machine Learning" in llm.calls[0]["user_prompt"]
     assert "Rafeeqak" in llm.calls[0]["system_prompt"]
     assert "Course ID   : ml" in llm.calls[0]["system_prompt"]
     assert "SOURCE MATERIAL RULES" in llm.calls[0]["system_prompt"]
-    assert "📄 Machine Learning | lecture.txt | Page/Chunk: text/chunk 1" in llm.calls[0]["system_prompt"]
+    assert "lecture.txt" not in llm.calls[0]["system_prompt"]
+    assert "Page/Chunk" not in llm.calls[0]["system_prompt"]
 
 
 def test_chatbot_system_prompt_renders_runtime_context() -> None:
@@ -197,14 +199,15 @@ def test_chatbot_system_prompt_renders_runtime_context() -> None:
         course_id="db-1",
         language="English",
         memory="Pending tasks: 2\nWeak topics: Indexes",
-        context="[1] 📄 Databases | notes.pdf | Page/Chunk: page 4\nB-tree indexes balance search paths.",
+        context="[Source 1]\nB-tree indexes balance search paths.",
     )
 
     assert "Course name : Databases" in prompt
     assert "Course ID   : db-1" in prompt
     assert "Pending tasks: 2" in prompt
     assert "B-tree indexes balance search paths." in prompt
-    assert "{file_name}" in prompt
+    assert "{file_name}" not in prompt
+    assert "Page/Chunk" not in prompt
     assert "{{" not in prompt
 
 

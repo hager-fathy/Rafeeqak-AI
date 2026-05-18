@@ -1,7 +1,9 @@
 import asyncio
+import base64
 import sys
 import warnings
 from datetime import datetime, timedelta
+from html import escape
 
 if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     with warnings.catch_warnings():
@@ -49,6 +51,7 @@ from src.ui.upload_page import render_upload_page
 
 UPLOADS_DIR = PROJECT_ROOT / "data" / "uploads"
 VECTOR_STORE_DIR = PROJECT_ROOT / "data" / "vector_store"
+APP_LOGO_PATH = PROJECT_ROOT / "assets" / "app_logo.svg"
 
 
 def ensure_directories() -> None:
@@ -80,7 +83,7 @@ def _render_gemini_config_warning(settings: LLMSettings, language: str) -> None:
 def main() -> None:
     st.set_page_config(
         page_title=t("app.title", "en"),
-        page_icon=":books:",
+        page_icon=str(APP_LOGO_PATH),
         layout="wide",
         initial_sidebar_state="collapsed",
     )
@@ -158,6 +161,7 @@ def main() -> None:
 
     with st.container(key="main_app_container"):
         st.markdown("<div class='main-app-container'></div>", unsafe_allow_html=True)
+        _render_app_brand(language)
         _render_gemini_config_warning(gemini_settings, language)
 
         nav_col_left, nav_col_center = st.columns([1, 2.4], gap="small", vertical_alignment="bottom")
@@ -246,6 +250,28 @@ def main() -> None:
             _render_course_management(courses, active_course, language)
             _render_reminder_notifications(language)
         pages[selected_page]["handler"](project_root=PROJECT_ROOT)
+
+
+def _render_app_brand(language: str) -> None:
+    logo_uri = _logo_data_uri()
+    direction = "rtl" if language == "ar" else "ltr"
+    st.markdown(
+        f"""
+<header class="app-brand" dir="{direction}">
+  <img class="app-brand-logo" src="{logo_uri}" alt="{escape(t('brand.name', language))}" />
+  <div class="app-brand-copy">
+    <div class="app-brand-name">{escape(t("brand.name", language))}</div>
+    <div class="app-brand-subtitle">{escape(t("app.title", language))}</div>
+  </div>
+</header>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _logo_data_uri() -> str:
+    encoded_logo = base64.b64encode(APP_LOGO_PATH.read_bytes()).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded_logo}"
 
 
 def _render_course_management(courses: list[dict], active_course: dict | None, language: str) -> None:

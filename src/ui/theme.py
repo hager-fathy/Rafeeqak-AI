@@ -389,6 +389,46 @@ h1, h2, h3 {
   font-weight: 700;
 }
 
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 74px;
+  margin-bottom: 0.25rem;
+}
+
+.app-brand[dir="rtl"] {
+  justify-content: flex-start;
+}
+
+.app-brand-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  flex: 0 0 72px;
+}
+
+.app-brand-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.app-brand-name {
+  color: var(--text-strong);
+  font-size: 1.35rem;
+  line-height: 1.05;
+  font-weight: 800;
+}
+
+.app-brand-subtitle {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+  margin-top: 0.18rem;
+}
+
 .st-key-chat_history_panel,
 .st-key-dashboard_course_cards,
 .st-key-upload_file_manager,

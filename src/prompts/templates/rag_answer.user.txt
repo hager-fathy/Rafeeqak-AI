@@ -7,7 +7,7 @@ Retrieved context:
 Student question:
 {{question}}
 
-Available source labels:
+Internal source IDs, for grounding only. Do not include them in the answer:
 {{citations}}
 
 Answer in {{language}}:

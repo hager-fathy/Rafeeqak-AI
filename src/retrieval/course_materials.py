@@ -12,6 +12,43 @@ from typing import Any
 
 SUPPORTED_EXTENSIONS = {".docx", ".md", ".pdf", ".pptx", ".txt"}
 TOKEN_PATTERN = re.compile(r"[\w\u0600-\u06FF]+", re.UNICODE)
+MIN_EXTRACTED_TEXT_LENGTH = 20
+SEARCH_STOPWORDS = {
+    "a",
+    "about",
+    "an",
+    "and",
+    "are",
+    "describe",
+    "explain",
+    "for",
+    "from",
+    "in",
+    "is",
+    "lecture",
+    "material",
+    "materials",
+    "me",
+    "my",
+    "notes",
+    "of",
+    "on",
+    "please",
+    "summarise",
+    "summarize",
+    "tell",
+    "the",
+    "this",
+    "to",
+    "what",
+}
+ACRONYM_ALIASES = {
+    "grc": [
+        "governance risk compliance",
+        "governance, risk, and compliance",
+        "governance risk and compliance",
+    ],
+}
 
 
 @dataclass(frozen=True)
@@ -23,6 +60,8 @@ class RetrievedChunk:
     chunk_index: int = 1
     course_id: str | None = None
     course_name: str | None = None
+    file_name: str | None = None
+    page_or_chunk: str | None = None
 
     def citation(self) -> str:
         if self.course_name:
@@ -94,21 +133,41 @@ class CourseMaterialIndexer:
         except Exception as exc:  # pragma: no cover - defensive path for optional parsers
             return {"ok": False, "file_name": file_path.name, "reason": str(exc)}
 
+        extracted_text_length = sum(len(str(section.get("text") or "").strip()) for section in sections)
+        text_previews = [
+            self._preview_text(str(section.get("text") or ""))
+            for section in sections[:3]
+            if str(section.get("text") or "").strip()
+        ]
+        if extracted_text_length < MIN_EXTRACTED_TEXT_LENGTH:
+            return {
+                "ok": False,
+                "file_name": file_path.name,
+                "reason": "Little or no extractable text was found.",
+                "extraction_status": "too_little_text",
+                "extracted_text_length": extracted_text_length,
+                "text_previews": text_previews,
+                "chunks": 0,
+            }
+
         chunks = []
         for section in sections:
             for chunk_index, chunk_text in enumerate(self._chunk_text(section["text"]), start=1):
                 vector = self._embed(chunk_text)
                 if not vector:
                     continue
+                page_or_chunk = section["label"] or f"chunk {chunk_index}"
                 chunks.append(
                     {
                         "id": f"{course_id or 'legacy'}:{file_path.name}:{section['label']}:{chunk_index}",
                         "course_id": course_id,
                         "course_name": course_name,
+                        "file_name": file_path.name,
                         "source_name": file_path.name,
                         "source_path": str(file_path),
                         "source_mtime": stat.st_mtime,
                         "source_size": stat.st_size,
+                        "page_or_chunk": page_or_chunk,
                         "section": section["label"],
                         "chunk_index": chunk_index,
                         "text": chunk_text,
@@ -118,7 +177,15 @@ class CourseMaterialIndexer:
                 )
 
         if not chunks:
-            return {"ok": False, "file_name": file_path.name, "reason": "No readable text was found."}
+            return {
+                "ok": False,
+                "file_name": file_path.name,
+                "reason": "Little or no extractable text was found.",
+                "extraction_status": "too_little_text",
+                "extracted_text_length": extracted_text_length,
+                "text_previews": text_previews,
+                "chunks": 0,
+            }
 
         store["chunks"] = [
             chunk
@@ -129,7 +196,13 @@ class CourseMaterialIndexer:
         store["updated_at_utc"] = datetime.utcnow().isoformat(timespec="seconds")
         self._save_store(store)
 
-        return {"ok": True, "file_name": file_path.name, "chunks": len(chunks)}
+        return {
+            "ok": True,
+            "file_name": file_path.name,
+            "chunks": len(chunks),
+            "extracted_text_length": extracted_text_length,
+            "text_previews": text_previews,
+        }
 
     def remove_file(
         self,
@@ -223,7 +296,9 @@ class CourseMaterialIndexer:
         course_id: str | None = None,
     ) -> list[RetrievedChunk]:
         query_vector = self._embed(query)
-        if not query_vector:
+        query_terms = self._query_terms(query)
+        query_phrases = self._query_phrases(query)
+        if not query_vector and not query_terms and not query_phrases:
             return []
 
         store = self._load_store()
@@ -231,17 +306,22 @@ class CourseMaterialIndexer:
         for chunk in store["chunks"]:
             if course_id is not None and chunk.get("course_id") != course_id:
                 continue
-            score = self._cosine_similarity(query_vector, chunk.get("embedding", {}))
+            score = max(
+                self._cosine_similarity(query_vector, chunk.get("embedding", {})),
+                self._lexical_match_score(chunk, query_terms=query_terms, query_phrases=query_phrases),
+            )
             if score >= min_score:
                 scored_chunks.append(
                     RetrievedChunk(
-                        source_name=chunk["source_name"],
-                        section=chunk["section"],
-                        text=chunk["text"],
+                        source_name=chunk.get("source_name") or chunk.get("file_name") or "",
+                        section=chunk.get("section") or chunk.get("page_or_chunk") or "",
+                        text=chunk.get("text") or "",
                         score=round(score, 4),
                         chunk_index=chunk.get("chunk_index", 1),
                         course_id=chunk.get("course_id"),
                         course_name=chunk.get("course_name"),
+                        file_name=chunk.get("file_name") or chunk.get("source_name"),
+                        page_or_chunk=chunk.get("page_or_chunk") or chunk.get("section"),
                     )
                 )
 
@@ -299,6 +379,8 @@ class CourseMaterialIndexer:
                     chunk_index=chunk.get("chunk_index", 1),
                     course_id=chunk.get("course_id"),
                     course_name=chunk.get("course_name"),
+                    file_name=chunk.get("file_name") or chunk.get("source_name"),
+                    page_or_chunk=chunk.get("page_or_chunk") or chunk.get("section"),
                 )
             )
 
@@ -320,6 +402,83 @@ class CourseMaterialIndexer:
             "chunks": len(chunks),
             "sources": source_names,
             "updated_at_utc": store.get("updated_at_utc"),
+        }
+
+    def diagnose_course(
+        self,
+        *,
+        course_id: str | None,
+        course_name: str | None = None,
+        query: str | None = None,
+        preview_limit: int = 3,
+    ) -> dict[str, Any]:
+        """Return internal diagnostics for active-course upload and retrieval state."""
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        upload_root = self._course_upload_dir(course_id) if course_id else self.uploads_dir
+        uploaded_files = [
+            file_path
+            for file_path in sorted(upload_root.glob("*"))
+            if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS
+        ]
+
+        extraction = []
+        for file_path in uploaded_files:
+            try:
+                sections = self._extract_sections(file_path)
+            except Exception as exc:  # pragma: no cover - diagnostics should not break chat
+                extraction.append(
+                    {
+                        "file_name": file_path.name,
+                        "extracted_text_length": 0,
+                        "text_previews": [],
+                        "error": str(exc),
+                    }
+                )
+                continue
+            previews = [
+                self._preview_text(str(section.get("text") or ""))
+                for section in sections[:preview_limit]
+                if str(section.get("text") or "").strip()
+            ]
+            extraction.append(
+                {
+                    "file_name": file_path.name,
+                    "extracted_text_length": sum(len(str(section.get("text") or "").strip()) for section in sections),
+                    "text_previews": previews,
+                }
+            )
+
+        store = self._load_store()
+        chunks = [
+            chunk
+            for chunk in store["chunks"]
+            if course_id is None or chunk.get("course_id") == course_id
+        ]
+        query_terms = self._query_terms(query or "")
+        query_phrases = self._query_phrases(query or "")
+        chunks_containing_query = [
+            {
+                "file_name": chunk.get("file_name") or chunk.get("source_name"),
+                "page_or_chunk": chunk.get("page_or_chunk") or chunk.get("section"),
+                "preview": self._preview_text(str(chunk.get("text") or "")),
+            }
+            for chunk in chunks
+            if self._lexical_match_score(chunk, query_terms=query_terms, query_phrases=query_phrases) > 0
+        ]
+
+        return {
+            "active_course_id": course_id,
+            "active_course_name": course_name,
+            "uploaded_file_count": len(uploaded_files),
+            "uploaded_file_names": [file_path.name for file_path in uploaded_files],
+            "extraction": extraction,
+            "indexed_chunk_count": len(chunks),
+            "indexed_sources": sorted({chunk.get("file_name") or chunk.get("source_name") for chunk in chunks}),
+            "query": query,
+            "query_terms": sorted(query_terms),
+            "query_phrases": sorted(query_phrases),
+            "chunks_containing_query_count": len(chunks_containing_query),
+            "chunks_containing_query": chunks_containing_query[:preview_limit],
         }
 
     def _extract_sections(self, file_path: Path) -> list[dict[str, str]]:
@@ -383,6 +542,12 @@ class CourseMaterialIndexer:
                 continue
         return file_path.read_text(encoding="utf-8", errors="ignore")
 
+    def _preview_text(self, text: str, *, max_length: int = 180) -> str:
+        compact = re.sub(r"\s+", " ", str(text or "")).strip()
+        if len(compact) <= max_length:
+            return compact
+        return compact[:max_length].rsplit(" ", 1)[0].rstrip() + "..."
+
     def _chunk_text(self, text: str) -> list[str]:
         normalized = re.sub(r"\s+", " ", text).strip()
         if not normalized:
@@ -419,6 +584,69 @@ class CourseMaterialIndexer:
             return 0.0
         smaller, larger = (left, right) if len(left) <= len(right) else (right, left)
         return sum(weight * larger.get(token, 0.0) for token, weight in smaller.items())
+
+    def _normalize_search_text(self, text: str) -> str:
+        tokens = [token.casefold() for token in TOKEN_PATTERN.findall(str(text or ""))]
+        return " ".join(tokens)
+
+    def _query_terms(self, query: str) -> set[str]:
+        tokens = [token.casefold() for token in TOKEN_PATTERN.findall(str(query or ""))]
+        terms = {token for token in tokens if token not in SEARCH_STOPWORDS}
+        if not terms:
+            terms = set(tokens)
+        for token in list(terms):
+            for alias in ACRONYM_ALIASES.get(token, []):
+                terms.update(TOKEN_PATTERN.findall(alias.casefold()))
+        return {term for term in terms if term and term not in SEARCH_STOPWORDS}
+
+    def _query_phrases(self, query: str) -> set[str]:
+        normalized = self._normalize_search_text(query)
+        phrases = {normalized} if normalized else set()
+        for token in TOKEN_PATTERN.findall(str(query or "").casefold()):
+            phrases.add(token)
+            for alias in ACRONYM_ALIASES.get(token, []):
+                phrases.add(self._normalize_search_text(alias))
+        return {phrase for phrase in phrases if phrase}
+
+    def _lexical_match_score(
+        self,
+        chunk: dict[str, Any],
+        *,
+        query_terms: set[str],
+        query_phrases: set[str],
+    ) -> float:
+        if not query_terms and not query_phrases:
+            return 0.0
+        searchable = " ".join(
+            str(chunk.get(field) or "")
+            for field in ("text", "source_name", "file_name", "section", "page_or_chunk")
+        )
+        normalized = self._normalize_search_text(searchable)
+        if not normalized:
+            return 0.0
+
+        chunk_terms = set(normalized.split())
+        for phrase in query_phrases:
+            if not phrase:
+                continue
+            phrase_terms = phrase.split()
+            if len(phrase_terms) == 1 and phrase in chunk_terms:
+                return 1.0
+            if len(phrase_terms) > 1 and phrase in normalized:
+                return 1.0
+
+        exact_matches = query_terms & chunk_terms
+        if exact_matches:
+            return max(0.35, min(0.95, len(exact_matches) / max(len(query_terms), 1)))
+
+        partial_matches = [
+            term
+            for term in query_terms
+            if len(term) >= 4 and any(term in chunk_term or chunk_term in term for chunk_term in chunk_terms)
+        ]
+        if partial_matches:
+            return max(0.12, min(0.5, len(partial_matches) / max(len(query_terms), 1)))
+        return 0.0
 
     def _load_store(self) -> dict[str, Any]:
         if not self.store_path.exists():

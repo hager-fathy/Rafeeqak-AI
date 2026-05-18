@@ -52,7 +52,7 @@ def test_filter_output_arabic_unsafe_uses_arabic_fallback() -> None:
     assert "لا أستطيع" in filtered
 
 
-def test_filter_output_preserves_rag_citations(tmp_path) -> None:
+def test_filter_output_removes_rag_citations_from_display_text(tmp_path) -> None:
     uploads_dir = tmp_path / "uploads"
     vector_store_dir = tmp_path / "vector_store"
     uploads_dir.mkdir()
@@ -67,8 +67,23 @@ def test_filter_output_preserves_rag_citations(tmp_path) -> None:
     filtered = filter_output(response, "en")
 
     assert filtered == response
-    assert "Sources:" in filtered
-    assert "lecture.txt" in filtered
+    assert "Sources:" not in filtered
+    assert "lecture.txt" not in filtered
+    assert "Page/Chunk" not in filtered
+
+
+def test_filter_output_strips_legacy_rag_source_section() -> None:
+    legacy = (
+        "Database security protects databases from unauthorized access.\n\n"
+        "Sources:\n\n"
+        "📄 ML | 20260517_221829_sys.pdf | Page/Chunk: page 3"
+    )
+
+    filtered = filter_output(legacy, "en")
+
+    assert filtered == "Database security protects databases from unauthorized access."
+    assert "20260517_221829_sys.pdf" not in filtered
+    assert "Page/Chunk" not in filtered
 
 
 def test_supervisor_applies_output_filter_on_unsafe_agent_text(tmp_path) -> None:

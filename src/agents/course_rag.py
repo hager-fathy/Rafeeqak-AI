@@ -15,6 +15,14 @@ SOURCE_HEADER_PATTERN = re.compile(
     r"^\s*(sources?|citations?|\u0627\u0644\u0645\u0635\u0627\u062f\u0631)\s*[:\uff1a]",
     re.IGNORECASE,
 )
+INLINE_SOURCE_LABEL_PATTERN = re.compile(
+    r"\s*(?:ðŸ“„|📄)?\s*[^.\n\r]*?\|\s*[^|\n\r]+\|\s*Page/Chunk\s*:\s*[^.\n\r]*",
+    re.IGNORECASE,
+)
+SOURCE_REFERENCE_PATTERN = re.compile(
+    r"\s*\(?\b(?:page|chunk)\s+\d+\b\)?",
+    re.IGNORECASE,
+)
 
 ENGLISH_VAGUE_QUERIES = {
     "explain",
@@ -130,11 +138,14 @@ class CourseRAGAgent:
         language = normalize_language(language)
         if self.needs_clarification(question, language=language):
             stats = self._safe_stats(course_id=course_id)
+            response = self._clarification_response(language, course_id=course_id, stats=stats)
             return {
                 "ok": False,
                 "status": "needs_clarification",
-                "response": self._clarification_response(language, course_id=course_id, stats=stats),
+                "answer": response,
+                "response": response,
                 "question": question,
+                "sources": [],
                 "citations": [],
                 "matches": [],
                 "stats": stats,
@@ -145,21 +156,30 @@ class CourseRAGAgent:
 
         index_result = self.indexer.index_all(course_id=course_id, course_name=course_name)
         stats = index_result["stats"]
+        diagnostics = self._course_diagnostics(
+            question=question,
+            course_id=course_id,
+            course_name=course_name,
+            stats=stats,
+            matches=[],
+        )
         if stats["chunks"] == 0:
+            response = (
+                self._low_text_extraction_response(language)
+                if diagnostics.get("uploaded_file_count", 0) > 0
+                else self._no_materials_response(language, course_name=course_name)
+            )
             return {
                 "ok": False,
                 "status": "no_materials",
-                "response": self._no_materials_response(language, course_name=course_name),
+                "answer": response,
+                "response": response,
                 "question": question,
+                "sources": [],
                 "citations": [],
                 "matches": [],
                 "stats": stats,
-                "diagnostics": self._retrieval_diagnostics(
-                    question=question,
-                    course_id=course_id,
-                    stats=stats,
-                    matches=[],
-                ),
+                "diagnostics": diagnostics,
                 "course_id": course_id,
                 "course_name": course_name,
             }
@@ -169,23 +189,27 @@ class CourseRAGAgent:
             self._filter_matches_to_course(raw_matches, course_id=course_id)
         )
         if not matches:
+            response = self._no_match_response(
+                language,
+                course_name=course_name,
+                question=question,
+                course_id=course_id,
+                stats=stats,
+            )
             return {
                 "ok": False,
                 "status": "no_relevant_match",
-                "response": self._no_match_response(
-                    language,
-                    course_name=course_name,
-                    question=question,
-                    course_id=course_id,
-                    stats=stats,
-                ),
+                "answer": response,
+                "response": response,
                 "question": question,
+                "sources": [],
                 "citations": [],
                 "matches": [],
                 "stats": stats,
-                "diagnostics": self._retrieval_diagnostics(
+                "diagnostics": self._course_diagnostics(
                     question=question,
                     course_id=course_id,
+                    course_name=course_name,
                     stats=stats,
                     matches=[],
                 ),
@@ -201,11 +225,14 @@ class CourseRAGAgent:
             course_name=course_name,
             memory=memory,
         )
+        sources = [self._source_payload(match, course_name=course_name) for match in matches]
         return {
             "ok": True,
             "status": "answered",
+            "answer": response,
             "response": response,
             "question": question,
+            "sources": sources,
             "citations": [self._source_label(match, course_name=course_name) for match in matches],
             "matches": [
                 {
@@ -221,9 +248,10 @@ class CourseRAGAgent:
                 for match in matches
             ],
             "stats": stats,
-            "diagnostics": self._retrieval_diagnostics(
+            "diagnostics": self._course_diagnostics(
                 question=question,
                 course_id=course_id,
+                course_name=course_name,
                 stats=stats,
                 matches=matches,
             ),
@@ -251,7 +279,7 @@ class CourseRAGAgent:
             memory=memory,
         )
         if llm_answer:
-            return self._with_sources(llm_answer, matches, language, course_name=course_name), "llm"
+            return self._clean_student_answer(llm_answer), "llm"
 
         return self._compose_offline_answer(
             question,
@@ -269,6 +297,17 @@ class CourseRAGAgent:
         return (
             "The selected course doesn't have enough uploaded material yet for this question. "
             "Try uploading the relevant lecture or chapter."
+        )
+
+    def _low_text_extraction_response(self, language: str) -> str:
+        if language == "ar":
+            return (
+                "تم رفع الملف، لكن لم يتم استخراج نص كافٍ منه. إذا كان الملف عبارة عن صور أو PDF ممسوح ضوئيًا، "
+                "ارفعي نسخة نصية أو Word أو PowerPoint."
+            )
+        return (
+            "The file was uploaded, but little or no text could be extracted. If this is a scanned PDF, "
+            "please upload a text-based PDF, DOCX, or PPTX."
         )
 
     def _no_match_response(
@@ -424,6 +463,45 @@ class CourseRAGAgent:
             ),
         }
 
+    def _course_diagnostics(
+        self,
+        *,
+        question: str,
+        course_id: str | None,
+        course_name: str | None,
+        stats: dict | None = None,
+        matches: list[RetrievedChunk] | None = None,
+    ) -> dict:
+        stats = stats or self._safe_stats(course_id=course_id)
+        matches = matches or []
+        diagnostics = self._retrieval_diagnostics(
+            question=question,
+            course_id=course_id,
+            stats=stats,
+            matches=matches,
+        )
+        diagnose_course = getattr(self.indexer, "diagnose_course", None)
+        if not callable(diagnose_course):
+            return diagnostics
+        try:
+            course_diagnostics = diagnose_course(
+                course_id=course_id,
+                course_name=course_name,
+                query=question,
+            )
+        except Exception:
+            return diagnostics
+        if not isinstance(course_diagnostics, dict):
+            return diagnostics
+
+        diagnostics.update(course_diagnostics)
+        diagnostics["active_course_has_uploaded_files"] = (
+            diagnostics.get("uploaded_file_count", 0) > 0
+            or diagnostics.get("active_course_has_uploaded_files", False)
+        )
+        diagnostics["active_course_has_indexed_chunks"] = stats.get("chunks", 0) > 0
+        return diagnostics
+
     def _display_query(self, question: str, *, max_length: int = 80) -> str:
         compact = " ".join(str(question or "").split())
         if len(compact) <= max_length:
@@ -477,7 +555,7 @@ class CourseRAGAgent:
         for point in points:
             answer_lines.append(f"- {self._educational_point(point, language=language)}")
 
-        return self._with_sources("\n".join(answer_lines), matches, language, course_name=course_name)
+        return self._clean_student_answer("\n".join(answer_lines))
 
     def _compose_llm_answer(
         self,
@@ -495,7 +573,7 @@ class CourseRAGAgent:
         source_blocks = []
         for index, match in enumerate(matches, start=1):
             source_blocks.append(
-                f"[{index}] {self._source_label(match, course_name=course_name)}\n"
+                f"[Source {index}]\n"
                 f"{self._trim_to_sentence(match.text, max_length=900)}"
             )
         response_language = "Arabic" if language == "ar" else "English"
@@ -516,7 +594,7 @@ class CourseRAGAgent:
             ),
             question=question,
             context=joined_sources,
-            citations="\n".join(f"- {self._source_label(match, course_name=course_name)}" for match in matches),
+            citations="\n".join(f"- Source {index}" for index, _match in enumerate(matches, start=1)),
             language=response_language,
         )
         try:
@@ -582,6 +660,18 @@ class CourseRAGAgent:
             page_or_chunk = f"chunk {chunk_index}"
         return f"📄 {resolved_course} | {source_name} | Page/Chunk: {page_or_chunk}"
 
+    def _source_payload(self, match: RetrievedChunk, *, course_name: str | None = None) -> dict:
+        return {
+            "course_name": " ".join(str(match.course_name or course_name or "").split()) or course_name or "this course",
+            "file_name": " ".join(str(match.file_name or match.source_name or "").split()),
+            "source_name": " ".join(str(match.source_name or "").split()),
+            "page_or_chunk": " ".join(str(match.page_or_chunk or match.section or "").split()),
+            "section": " ".join(str(match.section or "").split()),
+            "chunk_index": getattr(match, "chunk_index", None) or 1,
+            "score": match.score,
+            "label": self._source_label(match, course_name=course_name),
+        }
+
     def _with_sources(
         self,
         answer: str,
@@ -590,8 +680,8 @@ class CourseRAGAgent:
         *,
         course_name: str | None = None,
     ) -> str:
-        clean_answer = self._strip_sources(answer)
-        return f"{clean_answer}\n\n{self._format_sources(matches, language, course_name=course_name)}".strip()
+        del matches, language, course_name
+        return self._clean_student_answer(answer)
 
     def _strip_sources(self, answer: str) -> str:
         lines = str(answer or "").strip().splitlines()
@@ -601,6 +691,18 @@ class CourseRAGAgent:
                 break
             kept_lines.append(line)
         return "\n".join(kept_lines).strip()
+
+    def _clean_student_answer(self, answer: str) -> str:
+        clean_answer = self._strip_sources(answer)
+        clean_lines = []
+        for line in clean_answer.splitlines():
+            line = INLINE_SOURCE_LABEL_PATTERN.sub("", line).rstrip()
+            line = SOURCE_REFERENCE_PATTERN.sub("", line).rstrip()
+            if line.strip():
+                clean_lines.append(line)
+            elif clean_lines and clean_lines[-1] != "":
+                clean_lines.append("")
+        return "\n".join(clean_lines).strip()
 
     def _salient_points(
         self,

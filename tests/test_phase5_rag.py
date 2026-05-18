@@ -174,6 +174,30 @@ def test_course_material_search_filters_by_course_id(tmp_path) -> None:
     assert matches[0].citation() == "Machine Learning - ml_notes.txt - text/chunk 1"
 
 
+def test_course_material_indexer_stores_course_scoped_chunk_metadata(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    course_dir = uploads_dir / "security-course"
+    course_dir.mkdir(parents=True)
+    notes = course_dir / "grc_notes.txt"
+    notes.write_text(
+        "Governance, Risk, and Compliance defines policies, risk controls, and compliance tracking.",
+        encoding="utf-8",
+    )
+
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    result = indexer.index_file(notes, course_id="security-course", course_name="Security")
+    store = vector_store_dir.joinpath("course_materials.json").read_text(encoding="utf-8")
+
+    assert result["ok"] is True
+    assert result["extracted_text_length"] > 20
+    assert '"course_id": "security-course"' in store
+    assert '"course_name": "Security"' in store
+    assert '"file_name": "grc_notes.txt"' in store
+    assert '"page_or_chunk": "text"' in store
+    assert '"text": "Governance, Risk, and Compliance' in store
+
+
 def test_retrieval_only_returns_active_course_chunks_for_shared_terms(tmp_path) -> None:
     uploads_dir = tmp_path / "uploads"
     vector_store_dir = tmp_path / "vector_store"
@@ -238,9 +262,94 @@ def test_course_rag_agent_answers_with_citations(tmp_path) -> None:
 
     assert result["ok"] is True
     assert result["status"] == "answered"
-    assert "Sources:" in result["response"]
-    assert "📄 this course | lecture.txt | Page/Chunk: text/chunk 1" in result["response"]
+    assert result["answer"] == result["response"]
+    assert "Sources:" not in result["response"]
+    assert "lecture.txt" not in result["response"]
+    assert "Page/Chunk" not in result["response"]
+    assert result["sources"][0]["source_name"] == "lecture.txt"
     assert result["citations"] == ["📄 this course | lecture.txt | Page/Chunk: text/chunk 1"]
+
+
+def test_course_rag_answers_short_acronym_from_active_course_alias(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    ml_dir = uploads_dir / "ml-course"
+    sec_dir = uploads_dir / "security-course"
+    ml_dir.mkdir(parents=True)
+    sec_dir.mkdir(parents=True)
+    ml_dir.joinpath("ml_notes.txt").write_text(
+        "Backpropagation and gradient descent belong to machine learning.",
+        encoding="utf-8",
+    )
+    sec_dir.joinpath("security_notes.txt").write_text(
+        "Governance, Risk, and Compliance defines how an organization manages policies, risks, controls, and audits.",
+        encoding="utf-8",
+    )
+
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    indexer.index_all(course_id="ml-course", course_name="Machine Learning")
+    indexer.index_all(course_id="security-course", course_name="Security")
+
+    result = CourseRAGAgent(
+        uploads_dir=uploads_dir,
+        vector_store_dir=vector_store_dir,
+        llm_client=OfflineLLM(),
+    ).answer("explain GRC ?", course_id="security-course", course_name="Security")
+
+    assert result["ok"] is True
+    assert result["status"] == "answered"
+    assert result["matches"][0]["course_id"] == "security-course"
+    assert "Governance, Risk, and Compliance" in result["matches"][0]["text"]
+    assert result["diagnostics"]["chunks_containing_query_count"] == 1
+    assert "doesn't have enough uploaded material" not in result["response"]
+
+
+def test_course_rag_short_query_no_match_keeps_uploaded_material_message(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    sec_dir = uploads_dir / "security-course"
+    sec_dir.mkdir(parents=True)
+    sec_dir.joinpath("security_notes.txt").write_text(
+        "SOC tiers and incident response belong to the Security course.",
+        encoding="utf-8",
+    )
+    CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir).index_all(
+        course_id="security-course",
+        course_name="Security",
+    )
+
+    result = CourseRAGAgent(
+        uploads_dir=uploads_dir,
+        vector_store_dir=vector_store_dir,
+        llm_client=OfflineLLM(),
+    ).answer("GRC", course_id="security-course", course_name="Security")
+
+    assert result["status"] == "no_relevant_match"
+    assert "I found uploaded material for Security" in result["response"]
+    assert "GRC" in result["response"]
+    assert "doesn't have enough uploaded material" not in result["response"]
+    assert result["diagnostics"]["uploaded_file_count"] == 1
+    assert result["diagnostics"]["indexed_chunk_count"] == 1
+
+
+def test_course_rag_uploaded_file_with_no_text_uses_extraction_warning(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    sec_dir = uploads_dir / "security-course"
+    sec_dir.mkdir(parents=True)
+    sec_dir.joinpath("blank_notes.txt").write_text("   ", encoding="utf-8")
+
+    result = CourseRAGAgent(
+        uploads_dir=uploads_dir,
+        vector_store_dir=vector_store_dir,
+        llm_client=OfflineLLM(),
+    ).answer("explain GRC", course_id="security-course", course_name="Security")
+
+    assert result["status"] == "no_materials"
+    assert "little or no text could be extracted" in result["response"]
+    assert "doesn't have enough uploaded material" not in result["response"]
+    assert result["diagnostics"]["uploaded_file_count"] == 1
+    assert result["diagnostics"]["extraction"][0]["extracted_text_length"] == 0
 
 
 def test_course_rag_agent_uses_llm_when_available(tmp_path) -> None:
@@ -256,8 +365,10 @@ def test_course_rag_agent_uses_llm_when_available(tmp_path) -> None:
     result = agent.answer("Explain backpropagation from my notes")
 
     assert result["generation_mode"] == "llm"
-    assert result["response"].startswith("LLM answer")
-    assert "📄 this course | lecture.txt | Page/Chunk: text/chunk 1" in result["response"]
+    assert result["response"] == "LLM answer from notes."
+    assert "lecture.txt" not in result["response"]
+    assert "Page/Chunk" not in result["response"]
+    assert result["sources"][0]["source_name"] == "lecture.txt"
 
 
 def test_course_rag_agent_includes_course_name_in_citations_when_available(tmp_path) -> None:
@@ -279,7 +390,9 @@ def test_course_rag_agent_includes_course_name_in_citations_when_available(tmp_p
 
     assert result["ok"] is True
     assert result["citations"] == ["📄 Machine Learning | lecture.txt | Page/Chunk: text/chunk 1"]
-    assert "📄 Machine Learning | lecture.txt | Page/Chunk: text/chunk 1" in result["response"]
+    assert "lecture.txt" not in result["response"]
+    assert "Page/Chunk" not in result["response"]
+    assert result["sources"][0]["course_name"] == "Machine Learning"
     assert result["matches"][0]["citation"] == "📄 Machine Learning | lecture.txt | Page/Chunk: text/chunk 1"
 
 
@@ -300,7 +413,8 @@ def test_course_rag_agent_answers_arabic_questions_in_arabic(tmp_path) -> None:
 
     assert result["ok"] is True
     assert "\u062a\u0648\u0636\u062d \u0627\u0644\u0645\u0627\u062f\u0629" in result["response"]
-    assert "\u0627\u0644\u0645\u0635\u0627\u062f\u0631:" in result["response"]
+    assert "\u0627\u0644\u0645\u0635\u0627\u062f\u0631:" not in result["response"]
+    assert result["sources"][0]["source_name"] == "arabic_notes.txt"
 
 
 def test_course_rag_agent_clarifies_vague_query_without_retrieval(tmp_path) -> None:
@@ -443,8 +557,9 @@ def test_course_rag_agent_removes_duplicate_chunks_and_formats_unique_sources(tm
         "📄 SOC | INE Introduction to SOC Course File.pdf | Page/Chunk: page 201",
         "📄 SOC | INE Introduction to SOC Course File.pdf | Page/Chunk: page 5",
     ]
-    assert result["response"].count("📄 SOC | INE Introduction to SOC Course File.pdf | Page/Chunk: page 201") == 1
-    assert result["response"].count("📄 SOC | INE Introduction to SOC Course File.pdf | Page/Chunk: page 5") == 1
+    assert "INE Introduction to SOC Course File.pdf" not in result["response"]
+    assert "Page/Chunk" not in result["response"]
+    assert [source["section"] for source in result["sources"]] == ["page 201", "page 5"]
 
 
 def test_course_rag_agent_synthesizes_specific_query_instead_of_dumping_chunks(tmp_path) -> None:
@@ -463,7 +578,9 @@ def test_course_rag_agent_synthesizes_specific_query_instead_of_dumping_chunks(t
     assert "SOC tiers is covered in your course material" in result["response"]
     assert raw_chunk not in result["response"]
     assert "Based on your uploaded materials" not in result["response"]
-    assert "Sources:\n\n📄 this course | soc_notes.pdf | Page/Chunk: page 201" in result["response"]
+    assert "Sources:" not in result["response"]
+    assert "soc_notes.pdf" not in result["response"]
+    assert result["sources"][0]["source_name"] == "soc_notes.pdf"
 
 
 def test_supervisor_routes_course_material_questions_to_rag(tmp_path) -> None:
@@ -483,7 +600,8 @@ def test_supervisor_routes_course_material_questions_to_rag(tmp_path) -> None:
 
     assert result["agent"] == "course_rag_agent"
     assert result["payload"]["ok"] is True
-    assert "lecture.txt" in result["response"]
+    assert "lecture.txt" not in result["response"]
+    assert result["payload"]["sources"][0]["source_name"] == "lecture.txt"
     assert result["trace"][-2]["status"] == "completed"
 
 

@@ -42,6 +42,15 @@ _INTERNAL_PATH = re.compile(
     r")"
 )
 _RAW_CHUNK_JSON = re.compile(r'"\s*(?:chunk_index|source_name|score)\s*"\s*:\s*', re.IGNORECASE)
+_SOURCE_HEADER = re.compile(
+    r"^\s*(?:sources?|citations?|\u0627\u0644\u0645\u0635\u0627\u062f\u0631)\s*[:\uff1a]",
+    re.IGNORECASE,
+)
+_INLINE_SOURCE_LABEL = re.compile(
+    r"\s*(?:ðŸ“„|📄)?\s*[^.\n\r]*?\|\s*[^|\n\r]+\|\s*Page/Chunk\s*:\s*[^.\n\r]*",
+    re.IGNORECASE,
+)
+_SOURCE_REFERENCE = re.compile(r"\s*\(?\b(?:page|chunk)\s+\d+\b\)?", re.IGNORECASE)
 _LONG_LINE = 400
 
 
@@ -104,6 +113,22 @@ def _redact_secrets(text: str) -> tuple[str, bool]:
     return redacted, changed
 
 
+def _strip_source_metadata(text: str) -> tuple[str, bool]:
+    lines = []
+    stripped_section = False
+    for line in str(text or "").splitlines():
+        if _SOURCE_HEADER.match(line.strip()):
+            stripped_section = True
+            break
+        lines.append(line)
+
+    without_source_section = "\n".join(lines)
+    without_labels, label_count = _INLINE_SOURCE_LABEL.subn("", without_source_section)
+    without_refs, ref_count = _SOURCE_REFERENCE.subn("", without_labels)
+    cleaned = "\n".join(line.rstrip() for line in without_refs.splitlines()).strip()
+    return cleaned, stripped_section or label_count > 0 or ref_count > 0
+
+
 def _should_block_entirely(text: str) -> bool:
     return (
         _has_leakage(text)
@@ -119,6 +144,10 @@ def filter_output(response: str, language: str) -> str:
         return _fallback_message(language)
 
     text = str(response)
+    text, source_metadata_removed = _strip_source_metadata(text)
+    if _is_empty(text):
+        return _fallback_message(language, text=str(response))
+
     if _should_block_entirely(text):
         return _fallback_message(language, text=text)
 
@@ -127,5 +156,8 @@ def filter_output(response: str, language: str) -> str:
         if _should_block_entirely(redacted):
             return _fallback_message(language, text=text)
         return redacted
+
+    if source_metadata_removed:
+        return text
 
     return text

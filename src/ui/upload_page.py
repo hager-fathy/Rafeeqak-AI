@@ -92,6 +92,8 @@ def render_upload_page(project_root: Path) -> None:
                     if failed_results:
                         failed_names = ", ".join(f"{item['file_name']}: {item['reason']}" for item in failed_results)
                         st.warning(t("upload.failed", language, count=len(failed_results), details=failed_names))
+                        if any(item.get("extraction_status") == "too_little_text" for item in failed_results):
+                            st.warning(t("upload.low_text", language))
                     elif indexed_count:
                         st.info(t("upload.rag_ready", language))
                     st.rerun()
