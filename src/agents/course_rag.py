@@ -154,6 +154,12 @@ class CourseRAGAgent:
                 "citations": [],
                 "matches": [],
                 "stats": stats,
+                "diagnostics": self._retrieval_diagnostics(
+                    question=question,
+                    course_id=course_id,
+                    stats=stats,
+                    matches=[],
+                ),
                 "course_id": course_id,
                 "course_name": course_name,
             }
@@ -166,11 +172,23 @@ class CourseRAGAgent:
             return {
                 "ok": False,
                 "status": "no_relevant_match",
-                "response": self._no_match_response(language, course_name=course_name),
+                "response": self._no_match_response(
+                    language,
+                    course_name=course_name,
+                    question=question,
+                    course_id=course_id,
+                    stats=stats,
+                ),
                 "question": question,
                 "citations": [],
                 "matches": [],
                 "stats": stats,
+                "diagnostics": self._retrieval_diagnostics(
+                    question=question,
+                    course_id=course_id,
+                    stats=stats,
+                    matches=[],
+                ),
                 "course_id": course_id,
                 "course_name": course_name,
             }
@@ -203,6 +221,12 @@ class CourseRAGAgent:
                 for match in matches
             ],
             "stats": stats,
+            "diagnostics": self._retrieval_diagnostics(
+                question=question,
+                course_id=course_id,
+                stats=stats,
+                matches=matches,
+            ),
             "generation_mode": generation_mode,
             "course_id": course_id,
             "course_name": course_name,
@@ -247,8 +271,43 @@ class CourseRAGAgent:
             "Try uploading the relevant lecture or chapter."
         )
 
-    def _no_match_response(self, language: str, *, course_name: str | None = None) -> str:
+    def _no_match_response(
+        self,
+        language: str,
+        *,
+        course_name: str | None = None,
+        question: str = "",
+        course_id: str | None = None,
+        stats: dict | None = None,
+    ) -> str:
+        stats = stats or self._empty_stats()
         resolved_course = course_name or ("هذا المقرر" if language == "ar" else "this course")
+        if stats.get("chunks", 0) > 0:
+            related = self._related_course_topic_suggestions(question, course_id=course_id, limit=3)
+            if language == "ar":
+                response = (
+                    f"فيه ملفات مرفوعة لمادة {resolved_course}، لكن لم أستطع مطابقة "
+                    f"'{self._display_query(question)}' بدقة. هل تقصد موضوعًا أو ملفًا معينًا؟"
+                )
+                if related:
+                    response += "\nالموضوعات المتاحة في المادة:\n" + "\n".join(f"- {topic}" for topic in related)
+                return response
+
+            if related:
+                if len(related) == 1:
+                    suggestion = f"the file/topic related to {related[0]}"
+                else:
+                    suggestion = "one of these active-course topics: " + ", ".join(related)
+                return (
+                    f"I found uploaded material for {resolved_course}, but I couldn't match "
+                    f"'{self._display_query(question)}' confidently. Did you mean {suggestion}? "
+                    "You can also ask using the lecture title."
+                )
+            return (
+                f"I found uploaded material for {resolved_course}, but I couldn't match "
+                f"'{self._display_query(question)}' confidently. You can also ask using the lecture title."
+            )
+
         if language == "ar":
             return f"لم أجد ذلك في المواد المرفوعة لمقرر {resolved_course}."
         return f"I couldn't find that in the uploaded material for {resolved_course}."
@@ -304,14 +363,75 @@ class CourseRAGAgent:
         except Exception:
             return self._empty_stats()
 
-    def _course_topic_suggestions(self, *, course_id: str | None = None) -> list[str]:
+    def _course_topic_suggestions(self, *, course_id: str | None = None, limit: int = 3) -> list[str]:
         suggestions = getattr(self.indexer, "topic_suggestions", None)
         if not callable(suggestions):
             return []
         try:
-            return suggestions(course_id=course_id, limit=3)
+            return suggestions(course_id=course_id, limit=limit)
         except Exception:
             return []
+
+    def _related_course_topic_suggestions(
+        self,
+        question: str,
+        *,
+        course_id: str | None = None,
+        limit: int = 3,
+    ) -> list[str]:
+        suggestions = self._course_topic_suggestions(course_id=course_id, limit=25)
+        if not suggestions:
+            return []
+
+        query_tokens = self._topic_tokens(question, language="ar" if self._contains_arabic(question) else "en")
+        query_tokens = [token for token in query_tokens if len(token) >= 2]
+        related: list[str] = []
+        seen: set[str] = set()
+        if query_tokens:
+            for suggestion in suggestions:
+                candidate = suggestion.casefold()
+                candidate_tokens = self._tokens(suggestion)
+                if any(
+                    token in candidate
+                    or any(part.startswith(token) or token.startswith(part) for part in candidate_tokens)
+                    for token in query_tokens
+                ):
+                    key = suggestion.casefold()
+                    if key not in seen:
+                        related.append(suggestion)
+                        seen.add(key)
+                if len(related) >= limit:
+                    return related
+
+        return suggestions[:limit]
+
+    def _retrieval_diagnostics(
+        self,
+        *,
+        question: str,
+        course_id: str | None,
+        stats: dict,
+        matches: list[RetrievedChunk],
+    ) -> dict:
+        return {
+            "active_course_has_uploaded_files": stats.get("files", 0) > 0,
+            "active_course_has_indexed_chunks": stats.get("chunks", 0) > 0,
+            "retrieval_returned_zero_chunks": len(matches) == 0,
+            "related_filenames_or_topics": self._related_course_topic_suggestions(
+                question,
+                course_id=course_id,
+                limit=3,
+            ),
+        }
+
+    def _display_query(self, question: str, *, max_length: int = 80) -> str:
+        compact = " ".join(str(question or "").split())
+        if len(compact) <= max_length:
+            return compact
+        return compact[:max_length].rsplit(" ", 1)[0].rstrip() + "..."
+
+    def _contains_arabic(self, text: str) -> bool:
+        return any("\u0600" <= char <= "\u06FF" for char in str(text or ""))
 
     def _trim_to_sentence(self, text: str, *, max_length: int = 420) -> str:
         compact = " ".join(text.split())

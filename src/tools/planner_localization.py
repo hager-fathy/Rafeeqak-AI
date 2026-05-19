@@ -8,7 +8,9 @@ from typing import Any
 from src.localization import normalize_language, t
 
 _LECTURE_PATTERN = re.compile(r"^lecture\s+(\d+)\s*$", re.IGNORECASE)
+_LECTURE_TITLE_PATTERN = re.compile(r"^lecture\s+(\d+)\s*:\s*(.+)$", re.IGNORECASE)
 _LECTURES_RANGE_PATTERN = re.compile(r"^lectures\s+(\d+)\s*-\s*(\d+)\s*$", re.IGNORECASE)
+_EMBEDDED_LECTURE_PATTERN = re.compile(r"\blecture\s+(\d+)\b", re.IGNORECASE)
 
 _ARABIC_LECTURE_ORDINALS: dict[int, str] = {
     1: "الأولى",
@@ -36,6 +38,29 @@ _PHASE_KEYS_TO_AR: dict[str, str] = {
     "checkpoint": "اختبار قصير",
     "final_review": "مراجعة نهائية",
 }
+
+_TOPIC_TITLES_EN_TO_AR: dict[str, str] = {
+    "introduction to ml": "مقدمة في تعلم الآلة",
+    "introduction to machine learning": "مقدمة في تعلم الآلة",
+    "supervised learning": "التعلم تحت الإشراف",
+    "supervised learning basics": "أساسيات التعلم تحت الإشراف",
+}
+
+_STATUS_EN_TO_AR: dict[str, str] = {
+    "pending": "متبقي",
+    "completed": "مكتمل",
+}
+
+_TASK_TEXT_EN_TO_AR: dict[str, str] = {
+    "review supervised learning basics and complete lecture notes": (
+        "راجع أساسيات التعلم تحت الإشراف واستكمل ملاحظات المحاضرة"
+    ),
+}
+
+_TASK_FRAGMENT_EN_TO_AR: list[tuple[str, str]] = [
+    ("Review supervised learning basics", "راجع أساسيات التعلم تحت الإشراف"),
+    ("complete lecture notes", "استكمل ملاحظات المحاضرة"),
+]
 
 _TASK_PHRASES_EN_TO_AR: list[tuple[str, str]] = [
     (
@@ -96,6 +121,12 @@ def localize_planner_topic(topic: str, language: str | None) -> str:
     if not raw or language != "ar":
         return raw
 
+    lecture_title_match = _LECTURE_TITLE_PATTERN.match(raw)
+    if lecture_title_match:
+        lecture_label = localize_planner_topic(f"Lecture {lecture_title_match.group(1)}", language)
+        title = _localize_topic_title(lecture_title_match.group(2), language)
+        return f"{lecture_label}: {title}"
+
     lecture_match = _LECTURE_PATTERN.match(raw)
     if lecture_match:
         number = int(lecture_match.group(1))
@@ -112,7 +143,7 @@ def localize_planner_topic(topic: str, language: str | None) -> str:
         end_label = localize_planner_topic(f"Lecture {end}", language)
         return f"{start_label} إلى {end_label}"
 
-    return raw
+    return _localize_topic_title(raw, language)
 
 
 def localize_planner_phase(phase: str, language: str | None) -> str:
@@ -147,6 +178,10 @@ def localize_planner_task_text(
     localized_topic = localize_planner_topic(topic or "", language)
     normalized = raw
 
+    exact = _TASK_TEXT_EN_TO_AR.get(normalized.casefold())
+    if exact:
+        return exact
+
     for english_template, arabic_template in _TASK_PHRASES_EN_TO_AR:
         english_filled = english_template.format(topic=topic or localized_topic)
         if normalized.startswith(english_filled):
@@ -159,6 +194,9 @@ def localize_planner_task_text(
 
     for english, arabic in _TIME_NOTES_EN_TO_AR:
         normalized = normalized.replace(english, arabic)
+
+    for english, arabic in _TASK_FRAGMENT_EN_TO_AR:
+        normalized = re.sub(re.escape(english), arabic, normalized, flags=re.IGNORECASE)
 
     cover_match = re.search(r"Cover (Lectures?\s+[\d\-]+) first\.", normalized, re.IGNORECASE)
     if cover_match:
@@ -187,6 +225,28 @@ def localize_planner_task_text(
     return " ".join(normalized.split())
 
 
+def localize_study_task(task: dict[str, Any], language: str | None) -> dict[str, Any]:
+    """Return a copy of a study task with display fields localized for chat/UI text."""
+    language = normalize_language(language)
+    if language != "ar" or not isinstance(task, dict):
+        return dict(task or {})
+
+    localized = dict(task)
+    original_topic = str(task.get("topic") or "")
+    localized["topic"] = localize_planner_topic(original_topic, language)
+    localized["phase"] = localize_planner_phase(str(task.get("phase") or ""), language)
+    localized["task"] = localize_planner_task_text(
+        str(task.get("task") or ""),
+        language,
+        topic=original_topic,
+    )
+    for key in ("status", "state", "completion"):
+        value = str(task.get(key) or "").strip()
+        if value:
+            localized[key] = _STATUS_EN_TO_AR.get(value.casefold(), value)
+    return localized
+
+
 def _replace_embedded_english_terms(text: str) -> str:
     replacements = [
         ("review wrong answers", "مراجعة الإجابات الخاطئة"),
@@ -200,24 +260,37 @@ def _replace_embedded_english_terms(text: str) -> str:
         ("Mixed review", "مراجعة متنوعة"),
         ("Final review", "مراجعة نهائية"),
         ("Recovery session", "جلسة تعويض"),
+        ("Introduction to ML", "مقدمة في تعلم الآلة"),
+        ("Introduction to Machine Learning", "مقدمة في تعلم الآلة"),
+        ("Review supervised learning basics", "راجع أساسيات التعلم تحت الإشراف"),
+        ("complete lecture notes", "استكمل ملاحظات المحاضرة"),
+        ("pending", "متبقي"),
+        ("completed", "مكتمل"),
     ]
     updated = text
     for english, arabic in replacements:
         updated = re.sub(re.escape(english), arabic, updated, flags=re.IGNORECASE)
-    for match in _LECTURE_PATTERN.finditer(updated):
-        updated = updated.replace(match.group(0), localize_planner_topic(match.group(0), "ar"))
+    updated = _EMBEDDED_LECTURE_PATTERN.sub(
+        lambda match: localize_planner_topic(f"Lecture {match.group(1)}", "ar"),
+        updated,
+    )
     return updated
+
+
+def _localize_topic_title(title: str, language: str | None) -> str:
+    language = normalize_language(language)
+    raw = str(title or "").strip()
+    if not raw or language != "ar":
+        return raw
+    return _TOPIC_TITLES_EN_TO_AR.get(raw.casefold(), raw)
 
 
 def format_study_recommendation(task: dict[str, Any], language: str | None) -> str:
     language = normalize_language(language)
-    topic = localize_planner_topic(str(task.get("topic") or ""), language)
+    localized_task = localize_study_task(task, language)
+    topic = str(localized_task.get("topic") or "")
     hours = task.get("hours", 0)
-    goal = localize_planner_task_text(
-        str(task.get("task") or ""),
-        language,
-        topic=str(task.get("topic") or ""),
-    )
+    goal = str(localized_task.get("task") or "")
 
     checkpoint_note = ""
     if task.get("checkpoint") or task.get("quiz_required"):

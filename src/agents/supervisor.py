@@ -511,6 +511,8 @@ class SupervisorAgent:
         action = (
             "asked for a clearer topic before retrieving course-material chunks"
             if rag_result["status"] == "needs_clarification"
+            else "retrieval returned zero active-course chunks and asked for clarification"
+            if rag_result["status"] == "no_relevant_match"
             else "retrieved relevant course-material chunks"
         )
         return {
@@ -530,6 +532,7 @@ class SupervisorAgent:
                         "retrieved_chunk_course_ids": [
                             match.get("course_id") for match in rag_result.get("matches", [])
                         ],
+                        **rag_result.get("diagnostics", {}),
                     },
                 )
             ],

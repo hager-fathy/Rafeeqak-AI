@@ -195,6 +195,8 @@ def mark_done_hint(task: dict[str, Any], language: str) -> str:
 
 
 def tasks_to_timeline_rows(tasks: list[dict[str, Any]], *, language: str, course_scope: str | None) -> list[dict[str, Any]]:
+    from src.tools.planner_localization import localize_study_task
+
     rows: list[dict[str, Any]] = []
     plan = {"tasks": tasks}
     sync_completion_fields(plan, course_scope=course_scope)
@@ -204,13 +206,14 @@ def tasks_to_timeline_rows(tasks: list[dict[str, Any]], *, language: str, course
         sync_quiz_required(task)
         task_id = build_task_id(task, course_scope)
         task["task_id"] = task_id
+        localized_task = localize_study_task(task, language)
         rows.append(
             {
                 "task_id": task_id,
                 "date": task.get("date", ""),
-                "topic": task.get("topic", ""),
-                "phase": task.get("phase", ""),
-                "task": task.get("task", ""),
+                "topic": localized_task.get("topic", ""),
+                "phase": localized_task.get("phase", ""),
+                "task": localized_task.get("task", ""),
                 "hours": task.get("hours", 0),
                 "quiz_required_label": quiz_required_label(task, language),
                 "mark_as_done": is_task_completed(task, plan),

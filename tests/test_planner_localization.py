@@ -7,6 +7,7 @@ from src.agents.supervisor import SupervisorAgent
 from src.tools.planner_localization import (
     contains_english_planner_terms,
     format_study_recommendation,
+    localize_study_task,
     localize_planner_phase,
     localize_planner_task_text,
     localize_planner_topic,
@@ -42,6 +43,7 @@ def _checkpoint_task_plan() -> dict:
 def test_localize_lecture_topic_to_arabic() -> None:
     assert localize_planner_topic("Lecture 2", "ar") == "المحاضرة الثانية"
     assert localize_planner_topic("Lecture 7", "ar") == "المحاضرة رقم 7"
+    assert localize_planner_topic("Lecture 1: Introduction to ML", "ar") == "المحاضرة الأولى: مقدمة في تعلم الآلة"
 
 
 def test_localize_phase_labels_to_arabic() -> None:
@@ -71,6 +73,40 @@ def test_format_study_recommendation_arabic_is_natural() -> None:
     assert "الهدف هو" in response
     assert "اختبار قصير" in response
     assert not contains_english_planner_terms(response)
+
+
+def test_localize_study_task_translates_common_planner_fields() -> None:
+    localized = localize_study_task(
+        {
+            "topic": "Lecture 1: Introduction to ML",
+            "phase": "Concept review",
+            "task": "Review supervised learning basics and complete lecture notes",
+            "status": "pending",
+        },
+        "ar",
+    )
+
+    assert localized["topic"] == "المحاضرة الأولى: مقدمة في تعلم الآلة"
+    assert localized["phase"] == "مراجعة المفاهيم"
+    assert localized["task"] == "راجع أساسيات التعلم تحت الإشراف واستكمل ملاحظات المحاضرة"
+    assert localized["status"] == "متبقي"
+
+
+def test_arabic_recommendation_does_not_insert_raw_planner_fields() -> None:
+    response = format_study_recommendation(
+        {
+            "topic": "Lecture 1: Introduction to ML",
+            "phase": "Concept review",
+            "task": "Review supervised learning basics and complete lecture notes",
+            "hours": 2,
+        },
+        "ar",
+    )
+
+    assert "المحاضرة الأولى: مقدمة في تعلم الآلة" in response
+    assert "راجع أساسيات التعلم تحت الإشراف واستكمل ملاحظات المحاضرة" in response
+    assert "Lecture 1" not in response
+    assert "Review supervised" not in response
 
 
 def test_format_study_recommendation_english_unchanged() -> None:

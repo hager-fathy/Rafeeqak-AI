@@ -364,6 +364,67 @@ def test_course_rag_arabic_vague_query_suggests_only_active_course_topics(tmp_pa
     assert "threat hunting" not in result["response"]
 
 
+def test_course_rag_no_match_clarifies_with_active_course_suggestions_only(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    ml_dir = uploads_dir / "ml-course"
+    sec_dir = uploads_dir / "security-course"
+    ml_dir.mkdir(parents=True)
+    sec_dir.mkdir(parents=True)
+    ml_dir.joinpath("systems_lecture.txt").write_text(
+        "Systems design appears in the machine learning deployment notes.",
+        encoding="utf-8",
+    )
+    sec_dir.joinpath("soc_tiers.txt").write_text(
+        "SOC tiers and threat hunting belong to the Security course.",
+        encoding="utf-8",
+    )
+
+    indexer = CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir)
+    indexer.index_all(course_id="ml-course", course_name="ML")
+    indexer.index_all(course_id="security-course", course_name="Security")
+
+    result = CourseRAGAgent(
+        uploads_dir=uploads_dir,
+        vector_store_dir=vector_store_dir,
+        llm_client=OfflineLLM(),
+    ).answer("sys", course_id="ml-course", course_name="ML")
+
+    assert result["status"] == "no_relevant_match"
+    assert "I found uploaded material for ML" in result["response"]
+    assert "'sys'" in result["response"]
+    assert "systems lecture" in result["response"]
+    assert "SOC" not in result["response"]
+    assert result["diagnostics"]["active_course_has_uploaded_files"] is True
+    assert result["diagnostics"]["active_course_has_indexed_chunks"] is True
+    assert result["diagnostics"]["retrieval_returned_zero_chunks"] is True
+
+
+def test_course_rag_no_match_arabic_clarification_is_natural(tmp_path) -> None:
+    uploads_dir = tmp_path / "uploads"
+    vector_store_dir = tmp_path / "vector_store"
+    ml_dir = uploads_dir / "ml-course"
+    ml_dir.mkdir(parents=True)
+    ml_dir.joinpath("systems_lecture.txt").write_text(
+        "Systems design appears in the machine learning deployment notes.",
+        encoding="utf-8",
+    )
+    CourseMaterialIndexer(uploads_dir=uploads_dir, vector_store_dir=vector_store_dir).index_all(
+        course_id="ml-course",
+        course_name="ML",
+    )
+
+    result = CourseRAGAgent(
+        uploads_dir=uploads_dir,
+        vector_store_dir=vector_store_dir,
+        llm_client=OfflineLLM(),
+    ).answer("sys", language="ar", course_id="ml-course", course_name="ML")
+
+    assert result["status"] == "no_relevant_match"
+    assert "فيه ملفات مرفوعة لمادة ML" in result["response"]
+    assert "لم أستطع مطابقة 'sys' بدقة" in result["response"]
+
+
 def test_course_rag_agent_removes_duplicate_chunks_and_formats_unique_sources(tmp_path) -> None:
     agent = CourseRAGAgent(
         uploads_dir=tmp_path / "uploads",
