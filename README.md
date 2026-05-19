@@ -72,7 +72,57 @@ smart-study-planner/
 |-- tests/
 `-- docs/
 ```
+``` text 
+smart-study-planner/
+│
+├── app.py
+├── requirements.txt
+├── README.md
+│
+├── data/
+│   ├── uploads/
+│   └── vector_store/
+│
+├── src/
+│   ├── agents/
+│   │   ├── supervisor.py
+│   │   ├── rag_agent.py
+│   │   ├── quiz_agent.py
+│   │   ├── planner_agent.py
+│   │   ├── memory_agent.py
+│   │   ├── router_agent.py
+│   │   └── response_agent.py
+│   │
+│   ├── memory/
+│   │   ├── supabase_client.py
+│   │   └── memory_store.py
+│   │
+│   ├── retrieval/
+│   │   ├── loader.py
+│   │   ├── chunker.py
+│   │   ├── vector_index.py
+│   │   └── search.py
+│   │
+│   ├── tools/
+│   │   ├── cache.py
+│   │   ├── state_manager.py
+│   │   ├── llm_wrapper.py
+│   │   └── planner_utils.py
+│   │
+│   ├── ui/
+│   │   ├── chat.py
+│   │   ├── dashboard.py
+│   │   ├── planner.py
+│   │   ├── quiz.py
+│   │   └── settings.py
+│   │
+│   └── auth/
+│       ├── supabase_auth.py
+│       └── session.py
+|----
 
+
+``` 
 ## What Is Implemented Now
 
 - Authentication pages:
@@ -144,3 +194,21 @@ Remaining demo-hardening work should focus on:
 
 - Running the live Streamlit walkthrough in an environment with Python, pytest, Streamlit, and project dependencies installed
 - Updating `docs/manual_demo_validation.md` with pass/fail evidence from that live run
+
+``` text 
+┌──────────────────────────────┐
+│         FRONTEND (UI)        │
+│  Streamlit / Web Dashboard   │
+└─────────────┬────────────────┘
+              │
+┌─────────────▼────────────────┐
+│       AGENT LAYER            │
+│ Supervisor + Router Agent    │
+│ Planner | Quiz | RAG | Memory│
+└─────────────┬────────────────┘
+              │
+┌─────────────▼────────────────┐
+│     DATA & SERVICES LAYER    │
+│ Vector DB | Supabase | Files │
+└──────────────────────────────┘
+```

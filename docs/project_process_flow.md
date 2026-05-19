@@ -1070,3 +1070,34 @@ The strongest grading points are the multi-agent architecture, course-scoped mem
 - Short-answer grading is heuristic and may be less accurate than rubric-based LLM grading.
 - Manual demo validation file records a previous environment as blocked, so final live demo evidence should be updated after running Streamlit successfully.
 - Mobile responsiveness exists through CSS, but a full mobile UX review would still be useful.
+
+
+
+# Project Requirement 
+
+
+| Component | Requirement Description | How It is Applied in Project | (Files / Modules) | 
+|---|---|---|---|---|
+| **1. System Architecture (2 marks)** | Well-defined agent decomposition, memory design, module boundaries, clear interface contracts | The system uses a **Supervisor Agent** that coordinates multiple specialized agents (RAG, Quiz, Planner, Memory, Safety, Router). Each agent has a single responsibility and communicates through structured interfaces. Course-scoped architecture ensures isolation between different courses. | `src/agents/supervisor.py`, `src/agents/*.py`, `src/tools/state.py`, `src/retrieval/course_materials.py`, `src/memory/*` | 
+|  |  | Memory design includes **local JSON workspace + optional Supabase cloud memory**, with course-based separation of all data. | `src/agents/memory_agent.py`, `src/tools/state.py` | |
+| **2. Implementation (2 marks)** | All modules operational, integrated, and free of hardcoded logic | All major modules are fully implemented and integrated: authentication, RAG, quiz system, planner, dashboard, reminders, caching, and memory. System supports fallback logic when LLM is unavailable (no hardcoded static answers). | `app.py`, `src/ui/*`, `src/agents/*`, `src/tools/*` | 
+|  |  | Dynamic behavior supported via LLM + deterministic fallback (offline quiz, offline planner, offline RAG). | `src/agents/quiz_generator.py`, `src/agents/study_planner.py`, `src/agents/course_rag.py` | |
+| **3. Agent Collaboration & Intelligence (2 marks)** | Coherent inter-agent coordination with dynamic, query-driven decision-making | Supervisor dynamically routes each user query to the appropriate agent (RAG / Quiz / Planner / Memory / DB Query / Safety). Agents collaborate through shared state and course context. | `src/agents/supervisor.py`, `src/agents/input_router.py` | 
+|  |  | Example: Chat → Supervisor → RAG → Memory → Output Filter pipeline. Quiz results feed into Planner via weak-topic updates. | `src/agents/progress_evaluator.py`, `src/agents/study_planner.py` | |
+| **4. Memory Quality (2 marks)** | Accumulated context improves response quality; advanced memory capabilities | System includes multi-layer memory: course-scoped state, chat summaries, quiz history, weak topics, reminders, and optional Supabase persistence. Memory is actively used in planning and recommendations. | `src/agents/memory_agent.py`, `src/tools/state.py`, `src/tools/quiz_history.py` | 
+|  |  | Weak-topic detection from quizzes directly influences future study plans (adaptive learning loop). | `src/agents/progress_evaluator.py`, `src/agents/study_planner.py` | |
+| **5. User Interface (2 marks)** | Functional interactive interface (Streamlit or Gradio) | Full Streamlit-based multi-page system including login, course management, chat, upload, quiz, planner, dashboard, and settings. | `app.py`, `src/ui/chat_page.py`, `src/ui/upload_page.py`, `src/ui/quiz_page.py`, `src/ui/dashboard_page.py` | 
+|  |  | Supports Arabic/English UI, RTL layout, and navigation-based experience. | `src/localization.py`, `src/ui/theme.py` | |
+
+---
+
+## Bonus Features
+
+| Option | Feature Requirement | How It is Applied | Files | 
+|---|---|---|---|---|
+| **B** | Multilingual Support | System supports Arabic + English input/output. Memory and retrieval work across both languages. Includes RTL UI support and translation layer. | `src/localization.py`, `src/ui/theme.py`, `src/tools/planner_localization.py` | 
+| **C** | Prompt Injection Detection | Input validation before LLM routing using rule-based safety checks for adversarial prompts (English + Arabic). | `src/agents/safety_agent.py` |
+| **D** | Output Filtering / Guardrails | Output inspection layer removes secrets, system leaks, stack traces, and unsafe content before displaying results. | `src/tools/output_filter.py` | 
+
+
+---
