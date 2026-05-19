@@ -25,6 +25,9 @@ def test_theme_injects_rtl_css(monkeypatch) -> None:
 
     assert captured["unsafe"] is True
     assert "direction: rtl" in captured["body"]
+    assert '[data-testid="stAppViewContainer"] {\n  direction: ltr;' in captured["body"]
+    assert '[data-testid="stHorizontalBlock"] {\n  direction: ltr;' in captured["body"]
+    assert '[data-testid="stHorizontalBlock"] > div' not in captured["body"]
     assert "Noto Sans Arabic" in captured["body"]
 
 

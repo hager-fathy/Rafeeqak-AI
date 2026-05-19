@@ -500,7 +500,10 @@ def _direction_styles(language: str) -> str:
 """
 
     return """
-[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] {
+  direction: ltr;
+}
+
 section.main,
 [data-testid="stMarkdownContainer"],
 [data-testid="stForm"],
@@ -509,6 +512,10 @@ section.main,
 [data-testid="stVerticalBlockBorderWrapper"] {
   direction: rtl;
   text-align: right;
+}
+
+[data-testid="stHorizontalBlock"] {
+  direction: ltr;
 }
 
 .stTextInput input,
@@ -528,8 +535,7 @@ section.main,
 }
 
 [data-testid="stSegmentedControl"] [role="radiogroup"],
-[data-baseweb="select"],
-[data-testid="stHorizontalBlock"] {
+[data-baseweb="select"] {
   direction: rtl;
 }
 
